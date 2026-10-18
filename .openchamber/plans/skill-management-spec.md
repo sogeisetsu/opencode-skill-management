@@ -1,9 +1,9 @@
 # `skill_management` 工具规范（v3 · 最可行版本）
 
 > 状态：待实现（plan 阶段产出）
-> 基线：本机 **OpenCode v2.0.32**（原规范写 2.0.28）
-> 依据：`docs/feasibility-review.md` 的逐条核实。本文只保留**有证据**的写法；三处未证实项集中在 §9 preflight，先测后写。
-> 相较原规范（`C:/Users/suyue/.opencode/plan/skill_management-spec.md`）的差异清单见文末。
+> 基线：本机 **OpenCode v2.0.32**
+> 证据：结论取自本机 2.0.32 的二进制内嵌源码、`@opencode-ai/plugin` / `@opencode-ai/sdk` 类型定义与 `https://opencode.ai/config.json`，出处内联在各节。本文只保留**有证据**的写法；三处未证实项集中在 §9 preflight，先测后写。
+> 文末 §10 是相对上一版设计稿的改动清单。
 
 ---
 
@@ -111,7 +111,7 @@ skill_management({ action: "disable", name: "grill-me", dryRun: true })
 
 返回值：Markdown 文本（表格 + 一行结论）。不返回 JSON 包装，**不返回 skill 正文**（`ctx.skill.list()` 会带 `content`，只取 name/description/路径，永不回显）。
 
-> 相比原规范去掉了 `scope` 入参：V2 的 skill 注册表已涵盖全部来源，scope 只作为输出列出现。
+> `scope` 不作为入参：V2 的 skill 注册表已涵盖全部来源，scope 只作为输出列出现。
 
 ---
 
@@ -199,7 +199,7 @@ state = hit?.effect ?? "allow"                                  // 默认首条�
 
 **不要自己解析 JSONC 去合并全局/项目/agent 三层**：V2 启动时已把配置文档里的 `permissions` 追加进**每个** agent 的 `permissions` 数组，`ctx.agent.list()` 读到的就是最终规则集。
 
-> 「隐藏但不自动进上下文、仍可显式加载」不是 permission 的语义（那是原规范的一处误判），而是 frontmatter 的 `disable-model-invocation` / `metadata["opencode/autoinvoke"]`。本工具不碰 frontmatter。
+> 「隐藏但不自动进上下文、仍可显式加载」不是 permission 的语义（常见误判），而是 frontmatter 的 `disable-model-invocation` / `metadata["opencode/autoinvoke"]`。本工具不碰 frontmatter。
 
 ---
 
@@ -319,7 +319,7 @@ opencode plugin list          # 列出已加载插件及 source（local / packag
 
 ---
 
-## 10. 与原规范的差异
+## 10. 本版改动（相对上一版设计稿）
 
 **保留**：四动作、`disable` 走 permission `deny`、硬边界「不装不删不移动」、工具名 `skill_management`、JSONC 最小编辑、备份 + dryRun + 回读校验 + sidecar、`options:{codemode:false}`。
 

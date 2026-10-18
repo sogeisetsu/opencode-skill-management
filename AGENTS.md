@@ -13,13 +13,11 @@
 
 ```
 .openchamber/plans/skill-management-spec.md   实现规范（唯一权威）
-.openchamber/plans/feasibility-review.md      评测与证据
-.openchamber/plans/original-spec-v2.md        原始设计稿留档
 ```
 
 `.openchamber/plans/` 是 OpenChamber 的「仓库计划」目录（面板里 source = shared）。改规范就是改这里的文件。
 
-改规范时同步更新 `feasibility-review.md` 里对应的证据行；**没有证据的结论不要写进规范**，标 `[待实测]` 并给退路。
+规范里每条关键结论都内联标注了出处与 **已证实 / 待实测**；**没有证据的结论不要写进规范**，标 `[待实测]` 并给退路。
 
 ## 环境基线
 
