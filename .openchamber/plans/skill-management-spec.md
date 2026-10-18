@@ -34,7 +34,13 @@
 
 ### 1.1 形态
 
-仓库发布为 **npm 包**；V2 加载的入口是 **`{ id, setup(ctx) }`**，另带一个**不含逻辑的极薄 `server` 壳**，只为满足 `opencode plugin add` 的入口校验。
+仓库发布为 **npm 包**；V2 加载的入口就是 **`{ id, setup(ctx) }`**，包根 `exports["."]` 指向它即可。
+
+> ⚠️ **更正（实测推翻旧结论）**：早先写"必须另加一个薄 `server` 壳才能通过 `opencode plugin add`"，**不成立**。
+> 宿主判定入口用的是 `kE()` → `n(["server",""])` → 先试 `<pkg>/server`、失败再退回**包根**。用宿主同一个解析器（`Bun.resolveSync`）复现验证：
+> 只有 `exports:{".":"./index.js"}`、**没有** `./server` 的包，`l.server` 依然解析成功（走 `""` 回退），因此 `plugin add` 的门禁 `w(l.server, l.tui)` 返回 `"server"`，**收下**。
+> → **不需要 `server` 壳**，也就不必牵扯 v1 的 `Hooks` API。
+> **仍待实测**：只有包根 `{id,setup}` 的 npm 包，**运行时**是否被 server 端加载器正常加载（今天只证了 CLI 门禁通过）。退路：加 `./server` 子路径 —— 它会被优先采用。
 
 真实范本（本机已装的发布包，`oh-my-opencode-slim@3.0.4`）：
 
@@ -539,7 +545,7 @@ let Re = [...xx(e.tools, r), ...Px(e.permission, r), ...NH(e.permissions, fZ, ["
 1. preflight（§9 两项，先测后写；不通过就走备选路径并在文档里更新结论）。
 2. 只读动作：`list` + `inspect`（`ctx.skill.list()` + `ctx.agent.list()` 求值）。
 3. 写动作：`disable` / `enable`（标记注释、备份、`dryRun`、最小文本编辑、`agent.reload()` 回读校验、回滚、sidecar 审计）。
-4. 打包与发布：`package.json` 的 `exports`（`"."` 给 `{id, setup}`，另加薄 `server`）、README、npm 发布流程。
+4. 打包与发布：`package.json`（去掉 `private`、定版本、`exports["."]` 指向插件、补 LICENSE）、README 安装说明、npm 发布流程，以及"只带包根的包能否被运行时加载"这条 preflight。
 5. 按 §7 跑脚本化验收，含安装路径与两平台。
 
 ---
@@ -554,7 +560,7 @@ let Re = [...xx(e.tools, r), ...Px(e.permission, r), ...NH(e.permissions, fZ, ["
 | `editor.add({ input })` 是否接受原生 JSON Schema | **已证实：是** | 三条独立证据：宿主内置 MCP 桥、本机另一个活插件、本插件注册后实测可调用。退路（未触发、且有风险）：zod `tool.schema` |
 | 写 `permissions` 后是否热生效 | **已证实：是（无需重启）** | 未重启的运行中 service 在 `debug agents` 里立刻看到新规则（13/13 agent）；新会话里该 skill 从可见列表消失且加载被拒，同会话其它 skill 正常加载。**注意重载是异步的，回读必须轮询**；判据用"调用者 agent 达到期望"，不是"所有 agent"。退路（未触发）：明确告知「需新会话/重启」 |
 
-`opencode plugin add <spec>` 这条留给发布阶段（**已证实**：`plugin add` 先安装、再检查入口；`file:`/相对路径会被拒；所以本包必须带 `server` 或 `tui` 入口 —— 这也是 §1.1 保留薄 `server` 壳的直接原因）。
+`opencode plugin add <spec>` 这条留给发布阶段。**已证实**：`plugin add` 先安装、再检查入口；`file:`/相对路径会被拒；**入口门禁会回退到包根**（`n(["server",""])`），所以只有根 `exports` 的包也能被收下 —— 不需要 `server` 壳。**仍待实测**：这类包在运行时是否被正常加载（退路：加 `./server` 子路径，它会被优先采用）。
 
 已有可用的只读核查命令（本机）：
 
