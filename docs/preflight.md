@@ -1,0 +1,141 @@
+# Preflight 结果（OpenCode 2.0.32 本机实测）
+
+> 环境：本机 **OpenCode v2.0.32**（`opencode --version`）
+> 二进制（内嵌源码，`rg -a` 可抽）：`C:\Users\suyue\AppData\Local\Programs\@openchamberelectron\resources\opencode-cli\opencode.exe`
+> 复核方式：任何一条升级后都必须重跑本文列出的命令重新判定，不要沿用旧结论。
+
+---
+
+## (a) `<config>/plugins/*.js` 是否被自动加载
+
+**结论：通过。**
+
+实证：
+
+```pwsh
+opencode plugin list --builtin
+# ID                  VERSION  SOURCE
+# skill_management    local    C:\Users\suyue\.config\opencode\plugins\skill_management.js
+```
+
+- 插件文件放在 `<config>/plugins/skill_management.js` 即被宿主发现并加载，**无需**在配置里登记。
+- 宿主源码逐字：`var ih=["plugin","plugins"]` —— 目录名 **`plugin` 与 `plugins` 两种拼写都会扫**；命中条件是 `.ts`/`.js` 文件**或目录**。
+  → 推论（重要）：**不能把辅助代码拆成同目录下的第二个 `.js` 文件**，它会被当作插件加载而校验失败。所以 `skill_management.js` 必须是单文件。
+- 模块形状由宿主显式校验（2.0.32）：
+  - server 端接受两支：`{ id, effect(fn) }` 或 `{ id, setup(fn) }`，失败文案 `Plugin must export a default definition with an id and an effect or setup function.`
+  - TUI 端只认 `{ id, setup(fn) }`，失败文案 `Invalid V2 TUI plugin module: <target>`
+
+失败退路（未触发，已备）：把插件的**绝对路径或目录**写进全局配置的 `plugins` 数组（宿主 `plugin` / `plugins` 两个键都读）。本机现成例子见 `C:\Users\suyue\.config\openchamber\opencode.managed.json`。
+
+---
+
+## (b) `editor.add({ input })` 是否接受原生 JSON Schema
+
+**结论：通过。**
+
+三条独立证据：
+
+1. **宿主自己的内置 MCP 桥**就是这么传的（二进制内嵌源码）：
+   `add({ name: O.name, options:{…}, description, input: O.inputSchema ?? {type:"object",properties:{}}, output: O.outputSchema ?? {} })`
+   —— `inputSchema` 是 MCP 协议里的 JSON Schema。
+2. **本机另一个能跑的本地插件**（`opencode-agent-tool`）用纯手写 JSON Schema：
+   `input: { type:"object", properties:{…}, required:["action"], additionalProperties:true }`
+3. **本插件注册后实测可调用**（见 §7(1) 证据）：`run --standalone` 里 `skill_management` 按名字被直接调用并返回结果。
+
+失败退路（未触发，已备）：改用 `@opencode-ai/plugin` 的 `tool.schema`（zod）派生。
+⚠️ 但注意该包在本机是 **1.18.18**，与宿主 2.0.32 已漂移（其 `v2/promise/context.d.ts` 甚至没有 `ctx.tool` 域），所以退路本身也有风险；宁可用原生 JSON Schema。
+
+---
+
+## (c) 写 `permissions` 后是否热生效
+
+**结论：通过 —— 是热生效的（不需要重启）。**
+
+实测（本机真实全局配置，全程有备份，最终逐字节还原）：
+
+| 步骤 | 结果 |
+|---|---|
+| `disable grill-me` 写入规则 | ✅ 回读校验通过（`ctx.agent.reload()` + `ctx.agent.list()`，轮询 3 次） |
+| **未重启**运行中的 service → `opencode debug agents` | 13/13 个 agent 的规则集里都出现了 `{"action":"skill","resource":"grill-me","effect":"deny"}` |
+| 新会话调用 `skill {id:"grill-me"}` | `status=error`，`{"error":{"type":"permission.rejected","message":"Permission denied: skill"}}` |
+| 对照：同一会话调用 `skill {id:"windows-shell"}`（未停用） | `status=completed`，正常返回 `<skill_content name="windows-shell">` |
+| `grill-me` 是否还在模型可见的 `<skill>` 列表里 | **不在**（模型报告 No，列表里只有另一个 skill `grilling`） |
+| `enable grill-me` | ✅ 删除规则 + 清理空块 + 回读校验通过；配置**逐字节**回到写入前 |
+| `debug config` | 目标文件 `C:\Users\suyue\.config\opencode\opencode.jsonc` 确实在"已加载文档"列表里 |
+
+### 关键教训：重载是**异步**的，必须轮询
+
+`ctx.agent.reload()` 会在配置文件被宿主重新读入**之前**就返回。实现初期只调一次 reload 就立刻读，得到的是旧规则集，于是 `disable` 误判为"校验失败"并回滚（真实踩到过一次）。现在的做法是**每 200ms 轮询、最多 6s**，并可用环境变量 `SKILL_MGMT_VERIFY_TIMEOUT_MS` 覆盖（验收脚本用它构造"超时→回滚"的用例）。
+
+### 关键教训：全局规则 vs agent 规则的顺序**不是恒定的**
+
+实测写入后，本机 13 个 agent 里有 12 个把全局规则排在规则集**最后**（`last=true`，因此生效）；`fast-responder` 却排在 index 4（后面还有 16 条自己的规则）。所以：
+
+- 回读校验的判据必须是**调用者 agent 是否达到期望效果**，而不是"所有 agent 都达到"。
+- 若有 agent 用自己的后续规则覆盖了全局规则，应当**报告**而不是判失败（实现里会输出一行 `ℹ️ 另有 N 个 agent 结果不同…`）。
+
+### 观察到的拒绝形态（与规范原文不同）
+
+规范原先写"加载失败信息为 `Unable to load skill <id>`"。实测拒载时得到的是**权限拒绝**：
+
+```json
+{"error":{"type":"permission.rejected","message":"Permission denied: skill"}}
+```
+
+`Unable to load skill <id>` 只在**该 id 根本不存在**时出现（宿主源码里是先 `get(id)`、后 `assert`）。两者要区分开。
+
+### 退路（未触发，已备）
+
+若将来某版本变成"不热生效"：在工具输出里明确"需新会话/重启生效"，并同步进规范 §5 的工具 description。
+
+---
+
+## 附带发现（实现期间从宿主实测得到，规范 v4 未涵盖）
+
+### 1. `ctx.skill.list()` / `ctx.agent.list()` 返回的是**信封**，不是数组
+
+```js
+await ctx.skill.list()   // { location: { directory: "..." }, data: [ … ] }
+await ctx.agent.list()   // { location: { directory: "..." }, data: [ … ] }
+```
+
+拿**真正的注册表数组**要用 `transform` 的 draft：
+
+```js
+let skills
+const reg = await ctx.skill.transform((draft) => { skills = draft.list() })   // → 数组
+await reg.dispose()                                                            // 用完释放注册
+```
+
+实测形状：
+
+| 域 | draft.list() 返回 | 项字段 |
+|---|---|---|
+| `ctx.skill` | 数组（本机 29 项） | `{ id, name, description?, autoinvoke?, path, content }` |
+| `ctx.agent` | 数组（本机 13 项） | `{ id, name, request, mode, hidden, permissions, description?, system? }` |
+
+> 这解释了实现初期那个报错 `The "path" property must be of type string, got object`：信封对象的 `location` 是 `{directory}` 对象，被误当成 skill 的路径传进了 `path.resolve`。
+> 本插件两者都支持：优先 `transform`，失败再退回读 `list()` 的 `.data`（并已 dispose 注册，不留 hook）。
+
+### 2. 调用者 agent 很关键，不能"看所有 agent"
+
+本机 13 个 agent 的规则集差异极大：
+
+- `build` / `plan` / `compaction` / `fast-responder`：`{*,*,allow}` → 对任何 skill 都是 allow
+- `title` / `summary`：`{*,*,deny}`（全 deny，内部 agent）
+- `explorer` / `librarian` / `oracle` / `designer`：`{action:"skill", resource:"*", effect:"deny"}`
+- `orchestrator`：`{action:"skill", resource:"*", effect:"allow"}`
+
+**教训**：判断"是否已被更宽的规则覆盖为 deny"必须只看**调用者自己**的规则集。实现初期因为遍历了所有 agent，撞上 `title` 的全 deny，导致对 `build`/`orchestrator` 的 `disable` 被错误拒绝（0 写入）。这条已写进验收脚本作为回归测试。
+
+### 3. `options.codemode:false` 的副作用
+
+`codemode:false` 让工具进**原生工具表**（与内置 `skill`/`read`/`edit` 一致），但因此它**不在 Code Mode 里**：模型若在 `execute` 里用 `search()` 或 `tools.<name>` 去找，会得出"工具不存在"的错误结论（本轮真的观察到一次：模型跳过直接调用、在 Code Mode 里探测后放弃）。
+
+- 现状：按规范 §1 取 `codemode:false`（与内置工具一致，模型可直接按名字调用 —— 已实测成功）。
+- 若实际使用中模型频繁误判，候选改动是把 `options.codemode` 改为 `true`（代价：受 Code Mode 目录大小限制，本机另一个大型插件的注释记录了"工具因目录截断而从目录里掉出去"的经历）。
+
+### 4. 两个已知的输出形态陷阱
+
+- **不声明 `output` 就绝不能返回 `output` 字段**：宿主会报 `Tool result declared output without an output schema`。本插件只返回 `{ content }`。
+- 工具执行期上下文是 `{ …ctx, signal, progress(cb) }`，**没有 `directory`/`worktree`**（活样板注释原文："OpenCode 2 no longer hands a tool its session directory"）。
