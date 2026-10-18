@@ -1,0 +1,12 @@
+# OS / editor junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.swp
+
+# logs & temp
+*.log
+tmp/
+
+# node (实现阶段可能用到)
+node_modules/
