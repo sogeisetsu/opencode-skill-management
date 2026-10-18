@@ -7,6 +7,15 @@
 
 ---
 
+## Steps
+
+- [ ] preflight 三项未证实前提（plugins 目录自动加载 / `input` schema 形式 / 写规则后是否热生效）
+- [ ] 实现只读动作：`list` + `inspect`
+- [ ] 实现写动作：`disable` + `enable`（备份 · dryRun · 回读校验 · 回滚 · sidecar）
+- [ ] 按 §7 跑验收：新会话端到端 + Windows/Linux 各一遍
+
+---
+
 ## 0. 定位与边界
 
 一个 tool，四个动作：`list` / `inspect` / `disable` / `enable`。
@@ -35,7 +44,7 @@ export default {
       editor.add({
         name: "skill_management",
         options: { codemode: false },        // 必加：进原生工具表，可按名字直接调用
-        description: /* §6 */,
+        description: /* §5 */,
         input: /* §2 的 JSON Schema */,
         async execute(raw, toolCtx) {
           return { content: /* Markdown 文本 */ }
@@ -124,7 +133,7 @@ skill_management({ action: "disable", name: "grill-me", dryRun: true })
 
 - 只输出 `name` / `description`（首行、截断）/ `path`，绝不输出 SKILL.md 正文。
 - 末尾附统计：发现 N 个、已禁用 M 个、`ask` K 个。
-- 一致性：若 sidecar（§5.3）记录了某条规则而配置里已不存在，输出一行 `⚠️ sidecar 与配置不一致` 提示，不自动重放。
+- 一致性：若 sidecar（§4.3）记录了某条规则而配置里已不存在，输出一行 `⚠️ sidecar 与配置不一致` 提示，不自动重放。
 
 来源归类规则：
 
