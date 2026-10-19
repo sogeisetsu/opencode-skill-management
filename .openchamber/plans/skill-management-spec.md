@@ -740,3 +740,5 @@ opencode plugin list --builtin  # 已加载插件与 source（local / package / 
 > 注意：`plugin remove` 会在文件末尾多留一个换行；还原时需手工去掉（本次已做）。
 
 CI：`.github/workflows/verify.yml`（`ubuntu-latest` + `windows-latest`，node 22）。已推送并两平台全绿。
+
+**真实宿主新进程回归（v5，2026-10-20）**：`disable grill-me` → 新进程 `skill {id:"grill-me"}` 得到 `permission.rejected`；`enable grill-me` 走「标记注释命中（文件内自证）」，报告来源与删除后效果（`orchestrator` = allow），并列出 8 个自有规则覆盖的 agent；配置逐字节还原（`7D16F8A3…` / 15014 bytes）。

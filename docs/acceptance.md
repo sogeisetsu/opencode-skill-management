@@ -145,15 +145,14 @@ opencode plugin list --builtin
 
 > npm 首发细节：未发布的包无法先配 trusted publisher（npm/cli#8544），所以 rc.0 由本机手工发布建包；首次发布会先出现 `0.0.0-stage` 临时占位，且 `latest` 也会被指向该版本。后续版本改由 CI 的 trusted publishing 发布。
 
-### 真实宿主回归（v4 构建 · 历史记录）
-
-> v5 的新 `enable` 路径尚未在真实宿主新进程里回归（发布阶段一并跑）；以下为 v4 实测，写入/还原机制未变。
+### 真实宿主回归（v5 构建 · 2026-10-20）
 
 | 步骤 | 结果 |
 |---|---|
-| `disable grill-me` | ✅ 回读校验通过（轮询 3 次）；`7D16F8A3…` → `B1F5BA17…` |
-| `enable grill-me` | ✅ 命中标记注释并精确删除；清空空块；回读校验通过 |
-| 还原 | **逐字节一致** 回到 `7D16F8A3…`；sidecar 回到 `{"version":1,"rules":[]}` |
+| `disable grill-me` | ✅ 回读校验通过（轮询 3 次）；`7D16F8A3…` → 15126 bytes |
+| 新进程 `skill {id:"grill-me"}` | ✅ `permission.rejected` / `Permission denied: skill` |
+| `enable grill-me` | ✅ `定位方式：标记注释命中（文件内自证）`；来源=本工具；删除后 `orchestrator` = allow；列出 8 个自有规则覆盖的 agent |
+| 还原 | ✅ **逐字节一致** 回到 `7D16F8A3…` / 15014 bytes；空 `permissions` 块已清理；sidecar 回到空规则集 |
 
 ## 复跑方式
 
