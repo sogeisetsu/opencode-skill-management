@@ -145,3 +145,17 @@ await reg.dispose()                                                            /
 - **`enable` 判据放宽**：先看同行标记注释（文件内自证），再看 sidecar 记录，两者都没有才拒绝。回读校验的判据改为「调用者规则集里该三元组的条数确实减少」，因此删完仍被更宽规则压成 `deny` 时**不判失败**，而是照常报告实际效果与挡路规则。
 - **写入原子化**：同目录 `<file>.tmp` → `fs.renameSync` 覆盖（Windows / Linux 均由 Node 的 `rename` 提供替换语义）；备份滚动只保留 **1 份**。
 - 以上均由 `tools/verify.mjs` 的 G 段断言覆盖（167 项全绿）；**新 `enable` 路径的真实宿主新进程回归待发布阶段一并跑**。
+
+### 6. npm 包（只带包根）的运行时加载 —— 已证实（2026-10-19）
+
+```pwsh
+opencode plugin add opencode-skill-management@0.1.0-rc.0
+# Plugin "opencode-skill-management@0.1.0-rc.0" installed and added to ...\opencode.jsonc
+
+opencode plugin list
+# skill_management   0.1.0-rc.0   opencode-skill-management@0.1.0-rc.0
+```
+
+新进程 `opencode run --standalone` 里直接调用 `skill_management({action:"list"})` → `status=completed`。
+`package.json` 只有 `exports["."]`、**没有** `./server`，因此 §1.1 的退路（补 `./server`）**不需要**。
+`plugin check` 正常列出；`plugin remove` 正常移除（会在文件末尾多留一个换行，还原配置时要去掉）。

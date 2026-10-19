@@ -16,7 +16,8 @@
 - [x] 实现写动作：`disable` + `enable`（标记注释 · 备份 · dryRun · 回读校验 · 回滚 · sidecar 审计）
 - [x] 按 §7 跑脚本化验收（本机 Windows 全项；Linux 未跑，见 §11）
 - [x] §11 变更落地：`enable` 判据放宽 · 备份 1 份 + 原子写 · description 硬化，并补断言（167 项全绿）
-- [ ] CI（Windows + Linux 双跑）· 发布 npm（`plugin add` 的**运行时**加载待验）
+- [x] CI（Windows + Linux 双跑）· 首发 `0.1.0-rc.0`（本机手工建包）· **运行时加载已证实**（只带包根即可）
+- [ ] trusted publisher 配置（人工）· 由 CI 发后续版本 · 正式发布 `0.1.0`
 
 ---
 
@@ -42,7 +43,7 @@
 > 宿主判定入口用的是 `kE()` → `n(["server",""])` → 先试 `<pkg>/server`、失败再退回**包根**。用宿主同一个解析器（`Bun.resolveSync`）复现验证：
 > 只有 `exports:{".":"./index.js"}`、**没有** `./server` 的包，`l.server` 依然解析成功（走 `""` 回退），因此 `plugin add` 的门禁 `w(l.server, l.tui)` 返回 `"server"`，**收下**。
 > → **不需要 `server` 壳**，也就不必牵扯 v1 的 `Hooks` API。
-> **仍待实测**：只有包根 `{id,setup}` 的 npm 包，**运行时**是否被 server 端加载器正常加载（今天只证了 CLI 门禁通过）。退路：加 `./server` 子路径 —— 它会被优先采用。
+> **运行时加载已实测（2026-10-19，rc 包）**：`opencode plugin add opencode-skill-management@0.1.0-rc.0` → `plugin list` 显示 `skill_management 0.1.0-rc.0 opencode-skill-management@0.1.0-rc.0` → 新进程 `run --standalone` 直接调用工具并返回结果。**只带包根的包可以被运行时正常加载**，不需要 `./server` 回退。`plugin check` / `plugin remove` 生命周期也已实测。
 
 真实范本（本机已装的发布包，`oh-my-opencode-slim@3.0.4`）：
 
@@ -587,7 +588,7 @@ let Re = [...xx(e.tools, r), ...Px(e.permission, r), ...NH(e.permissions, fZ, ["
 | `editor.add({ input })` 是否接受原生 JSON Schema | **已证实：是** | 三条独立证据：宿主内置 MCP 桥、本机另一个活插件、本插件注册后实测可调用。退路（未触发、且有风险）：zod `tool.schema` |
 | 写 `permissions` 后是否热生效 | **已证实：是（无需重启）** | 未重启的运行中 service 在 `debug agents` 里立刻看到新规则（13/13 agent）；新会话里该 skill 从可见列表消失且加载被拒，同会话其它 skill 正常加载。**注意重载是异步的，回读必须轮询**；判据用"调用者 agent 达到期望"，不是"所有 agent"。退路（未触发）：明确告知「需新会话/重启」 |
 
-`opencode plugin add <spec>` 这条留给发布阶段。**已证实**：`plugin add` 先安装、再检查入口；`file:`/相对路径会被拒；**入口门禁会回退到包根**（`n(["server",""])`），所以只有根 `exports` 的包也能被收下 —— 不需要 `server` 壳。**仍待实测**：这类包在运行时是否被正常加载（退路：加 `./server` 子路径，它会被优先采用）。
+`opencode plugin add <spec>` 这条已在发布阶段实测。**已证实**：`plugin add` 先安装、再检查入口；`file:`/相对路径会被拒；**入口门禁会回退到包根**（`n(["server",""])`），所以只有根 `exports` 的包也能被收下 —— 不需要 `server` 壳。**运行时加载也已证实**：`opencode-skill-management@0.1.0-rc.0`（只有 `exports["."]`）安装后，`plugin list` 的 source 显示为包名，新进程 `run --standalone` 可正常调用 `skill_management`；`plugin check` / `plugin remove` 同样可用。
 
 已有可用的只读核查命令（本机）：
 
@@ -691,7 +692,9 @@ opencode plugin list --builtin  # 已加载插件与 source（local / package / 
 
 **发布前置**：补 `LICENSE`（MIT 全文，年份 **2026**，署名 **sogeisetsu**）；`package.json` 去掉 `private: true`、定 `0.1.0`、补 `repository`（`https://github.com/sogeisetsu/opencode-skill-management`，必须与仓库完全一致）/ `bugs` / `homepage` / `keywords`；README 安装段改序。
 
-**首发必须先发 `0.1.0-rc.0`** 验证**运行时**能加载"只带包根"的包（`plugin add` 的 CLI 门禁已证会收下，运行时加载**未证**）。退路：补 `exports["./server"]` 指向同一文件。
+**首发必须先发 `0.1.0-rc.0`** 验证**运行时**能加载"只带包根"的包。**实测（2026-10-19）**：npm 不允许给未发布的包配置 trusted publisher（循环依赖，npm/cli#8544），因此 rc.0 改为**本机手工发布**（本机已登录 + 安全密钥 2FA）；包创建后再配 trusted publisher，后续版本（`rc.1` / `0.1.0`）由 CI 发布。运行时加载**已证实**，不需要 `exports["./server"]` 回退。
+
+> 实测到的 npm 细节：第一次 `npm publish --tag next` 会先出现一个 `0.0.0-stage` 的临时占位版本（stub），几秒后真实版本才可查；且首次发布后 **`latest` 也会被指向这个版本**（即使指定了 `--tag next`）。发正式版后 `latest` 会随之更新。
 
 **CI**：`.github/workflows/verify.yml`，matrix `ubuntu-latest` + `windows-latest`，node 22，跑 `node tools/verify.mjs`（harness 全程在临时 `<config>` 下，不需要任何 secret）。
 
@@ -720,4 +723,17 @@ opencode plugin list --builtin  # 已加载插件与 source（local / package / 
 | §11.2 | 多次写入后备份目录只有 **1** 份；写盘后无 `<file>.tmp` 残留 |
 | §11.3 | `description` 含 native tool / by name / Code Mode `search()`；`options.codemode` 仍为 `false` |
 
-CI：`.github/workflows/verify.yml`（`ubuntu-latest` + `windows-latest`，node 22）。本机未跑 CI，**待首次 push 后确认两平台结果**。
+**npm 包运行时加载（2026-10-19，本机）**：
+
+| 步骤 | 结果 |
+|---|---|
+| `npm publish --tag next`（本机，rc.0） | ✅ `opencode-skill-management@0.1.0-rc.0`；随后 `npm view` 可见 |
+| `opencode plugin add opencode-skill-management@0.1.0-rc.0` | ✅ 写入全局配置 `plugins` 数组 |
+| `opencode plugin list` | ✅ `skill_management 0.1.0-rc.0 opencode-skill-management@0.1.0-rc.0` |
+| 新进程 `run --standalone` 调用 `skill_management` | ✅ `status=completed`（只带包根即可，无需 `./server`） |
+| `opencode plugin check` | ✅ 列为 current |
+| `opencode plugin remove ...` | ✅ 从配置移除；全局配置随后**逐字节还原**（`7D16F8A3…`，15014 bytes） |
+
+> 注意：`plugin remove` 会在文件末尾多留一个换行；还原时需手工去掉（本次已做）。
+
+CI：`.github/workflows/verify.yml`（`ubuntu-latest` + `windows-latest`，node 22）。已推送并两平台全绿。

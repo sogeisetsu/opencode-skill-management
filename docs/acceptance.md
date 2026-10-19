@@ -127,6 +127,21 @@ opencode plugin list --builtin
 - 原子写：同目录 `.tmp` + `renameSync`，验收断言写入后无 `.tmp` 残留。
 - 备份滚动只保留 **1 份**（配置文件含 MCP 凭据，副本越少越好）；多次写入后断言仍为 1 份。
 
+### C. npm 包分发与运行时加载（v5 · 2026-10-19）
+
+| 步骤 | 结果 |
+|---|---|
+| `npm publish --tag next`（本机手工，rc.0） | ✅ `opencode-skill-management@0.1.0-rc.0` |
+| `opencode plugin add opencode-skill-management@0.1.0-rc.0` | ✅ 写入全局配置 `plugins` |
+| `opencode plugin list` | ✅ `skill_management 0.1.0-rc.0 opencode-skill-management@0.1.0-rc.0` |
+| 新进程 `run --standalone` | ✅ 工具可调用、`status=completed` |
+| `plugin check` | ✅ current |
+| `plugin remove` | ✅ 移除成功；配置随后逐字节还原（`7D16F8A3…` / 15014 bytes） |
+
+只带包根（`exports["."]`）的包运行时加载正常，**不需要** `./server` 子路径。
+
+> npm 首发细节：未发布的包无法先配 trusted publisher（npm/cli#8544），所以 rc.0 由本机手工发布建包；首次发布会先出现 `0.0.0-stage` 临时占位，且 `latest` 也会被指向该版本。后续版本改由 CI 的 trusted publishing 发布。
+
 ### 真实宿主回归（v4 构建 · 历史记录）
 
 > v5 的新 `enable` 路径尚未在真实宿主新进程里回归（发布阶段一并跑）；以下为 v4 实测，写入/还原机制未变。
