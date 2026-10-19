@@ -137,6 +137,8 @@ opencode plugin list --builtin
 | 新进程 `run --standalone` | ✅ 工具可调用、`status=completed` |
 | `plugin check` | ✅ current |
 | `plugin remove` | ✅ 移除成功；配置随后逐字节还原（`7D16F8A3…` / 15014 bytes） |
+| Trusted Publisher | ✅ `sogeisetsu/opencode-skill-management` · `publish.yml` · `npm publish` + `npm dist-tag`；状态 Valid |
+| `v0.1.0-rc.1` CI 发布 | ✅ `publish.yml` 成功；`next` → `0.1.0-rc.1`；SLSA provenance 已生成 |
 
 只带包根（`exports["."]`）的包运行时加载正常，**不需要** `./server` 子路径。
 

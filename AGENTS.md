@@ -12,7 +12,7 @@ node tools/install.mjs               # 幂等安装到 <config>/plugins/skill_ma
 ```
 
 - 仓库里的 `src/skill_management.js` 是**唯一源**；`<config>/plugins/` 下那份是安装产物，**别直接改**（改完必须重跑上面两条）。
-- 没有测试框架 / lint / CI —— 验收就是 `tools/verify.mjs`。
+- 没有测试框架 / lint；CI（`.github/workflows/verify.yml`）在 Windows + Linux 上跑 `tools/verify.mjs`。
 - 端到端必须在**新进程**里验（插件在宿主进程启动时加载）：
   `opencode run --standalone --auto --format json '<消息>'` —— 消息是**位置参数**，没有 `--prompt`。
 
