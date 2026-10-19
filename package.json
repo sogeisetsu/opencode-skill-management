@@ -1,7 +1,6 @@
 {
   "name": "opencode-skill-management",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "OpenCode V2 plugin: list / inspect / disable / enable installed skills by writing one global permission rule",
   "type": "module",
   "exports": {
@@ -14,6 +13,21 @@
     "node": ">=18"
   },
   "license": "MIT",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "skills",
+    "permissions",
+    "plugin"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sogeisetsu/opencode-skill-management"
+  },
+  "bugs": {
+    "url": "https://github.com/sogeisetsu/opencode-skill-management/issues"
+  },
+  "homepage": "https://github.com/sogeisetsu/opencode-skill-management",
   "scripts": {
     "verify": "node tools/verify.mjs",
     "install:plugin": "node tools/install.mjs"

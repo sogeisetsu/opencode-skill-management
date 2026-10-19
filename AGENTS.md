@@ -6,8 +6,8 @@
 ## 命令
 
 ```pwsh
-node tools/verify.mjs                # 136 项断言；跑在临时 <config> 下，不碰真实配置
-node tools/verify.mjs --section F    # 只跑一段（A–F，按标题前缀匹配，大小写不敏感）
+node tools/verify.mjs                # 167 项断言；跑在临时 <config> 下，不碰真实配置
+node tools/verify.mjs --section G    # 只跑一段（A–G，按标题前缀匹配，大小写不敏感）
 node tools/install.mjs               # 幂等安装到 <config>/plugins/skill_management.js
 ```
 

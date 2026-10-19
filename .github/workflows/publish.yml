@@ -1,0 +1,50 @@
+name: publish
+
+# 由 tag 触发：`v<package.json version>`
+#   v0.1.0-rc.0 → npm dist-tag `next`
+#   v0.1.0      → npm dist-tag `latest`
+#
+# 发布走 npm Trusted Publishing（OIDC），不需要任何 token/secret：
+#   npmjs.com → 包设置 → Trusted Publisher → GitHub Actions
+#   owner/repo/workflow = sogeisetsu / opencode-skill-management / publish.yml
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  id-token: write # trusted publishing 必需
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Upgrade npm (trusted publishing needs >= 11.5.1, dist-tags >= 11.21.0)
+        run: npm install -g npm@latest
+
+      - name: Verify before publishing
+        run: node tools/verify.mjs
+
+      - name: Publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          if [[ "${GITHUB_REF_NAME}" != "v${VERSION}" ]]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package.json version ${VERSION}"
+            exit 1
+          fi
+          case "${VERSION}" in
+            *-*) DIST_TAG=next ;;
+            *)   DIST_TAG=latest ;;
+          esac
+          echo "publishing ${VERSION} with dist-tag ${DIST_TAG}"
+          npm publish --tag "${DIST_TAG}"

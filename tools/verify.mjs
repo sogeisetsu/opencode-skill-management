@@ -367,7 +367,11 @@ function makeCtx(opts = {}) {
   const agentItems = () =>
     agents.map((a) => ({
       ...a,
-      permissions: [{ action: "*", resource: "*", effect: "allow" }, ...(opts.staleAgents ? [] : readRules())],
+      permissions: [
+        { action: "*", resource: "*", effect: "allow" },
+        ...(opts.staleAgents ? [] : readRules()),
+        ...(opts.agentRules?.[a.id] ?? []),
+      ],
     }))
 
   const stats = { disposed: 0 }
@@ -642,20 +646,137 @@ section("F 反推 id（§3.5）与 enable 归属边界")
   const l2 = (await call("list")).text
   ok("注册表自带 id 时不显示反推计数", !l2.includes("由路径反推"), l2)
 
-  // enable 归属边界：sidecar 无记录 → 即使规则带本工具标记也拒绝（fail-closed）
+  // §11.1：sidecar 丢失但标记还在 → **应当删除成功**（标记是文件内自证，优先于 sidecar）
   {
     cfgsWrite(ORIGINAL)
     const d = await call("disable", { id: "windows-shell" })
     ok("前置：disable 成功（带标记）", d.text.includes("✅"), d.text)
     mod.saveSidecar(tmpConfigDir, { rules: [] }) // 模拟 sidecar 丢失
-    const before = fs.readFileSync(CFG)
     const e = await call("enable", { id: "windows-shell" })
-    ok("sidecar 无记录时即使有标记也拒绝执行", e.text.includes("拒绝执行"), e.text)
-    ok("拒绝原因点明是「sidecar 里没有记录」", e.text.includes("sidecar") && e.text.includes("没有"), e.text)
-    ok("拒绝时不动文件", fs.readFileSync(CFG).equals(before))
-    cfgsWrite(ORIGINAL)
+    ok("sidecar 无记录但标记命中 → 删除成功（§11.1 新行为）", e.text.includes("✅"), e.text)
+    ok("定位方式报告为标记注释", e.text.includes("标记注释"), e.text)
+    ok("删除后逐字节还原", fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")), fs.readFileSync(CFG).toString("utf8"))
     mod.saveSidecar(tmpConfigDir, { rules: [] })
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// G. §11 变更：enable 判据放宽 / 备份 1 份 + 原子写 / description 硬化
+// ─────────────────────────────────────────────────────────────
+section("G §11 变更（enable 放宽 · 备份 1 份 + 原子写 · description）")
+{
+  const backupsDir = path.join(tmpConfigDir, "skill_management.backups")
+  const backupCount = () => (fs.existsSync(backupsDir) ? fs.readdirSync(backupsDir).length : 0)
+
+  // (a) 标记命中 → 删；成功输出必须报告来源与删除后的生效效果
+  cfgsWrite(ORIGINAL)
+  const d1 = await call("disable", { id: "windows-shell" })
+  ok("G 前置：disable 成功", d1.text.includes("✅"), d1.text)
+  ok("G 原子写不留下 .tmp 文件", !fs.existsSync(`${CFG}.tmp`), `${CFG}.tmp`)
+  const e1 = await call("enable", { id: "windows-shell" })
+  ok("G(a) 标记命中即删除", e1.text.includes("✅") && fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")), e1.text)
+  ok("G(a) 报告被删规则的来源", /被删规则的来源：本工具写入/.test(e1.text), e1.text)
+  ok("G(a) 报告删除后的生效效果（调用者 agent）", /删除后的生效效果[\s\S]*`build`[\s\S]*allow/.test(e1.text), e1.text)
+  ok("G 备份只保留 1 份（MAX_BACKUPS=1）", backupCount() === 1, `实际 ${backupCount()} 份：${fs.existsSync(backupsDir) ? fs.readdirSync(backupsDir).join(", ") : "(无)"}`)
+
+  // 再写两次，备份仍只 1 份
+  await call("disable", { id: "windows-shell" })
+  await call("enable", { id: "windows-shell" })
+  ok("G 多次写入后备份仍只有 1 份", backupCount() === 1, `实际 ${backupCount()} 份`)
+  ok("G 多次写入后仍无 .tmp 残留", !fs.existsSync(`${CFG}.tmp`))
+
+  // (c) 标记与 sidecar 都没有 → 拒绝并给出原文
+  {
+    cfgsWrite('{\n  "permissions": [\n    { "action": "skill", "resource": "windows-shell", "effect": "deny" }\n  ]\n}\n')
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    const before = fs.readFileSync(CFG)
+    const r = await call("enable", { id: "windows-shell" })
+    ok("G(c) 无标记且无 sidecar → 拒绝执行", r.text.includes("拒绝执行"), r.text)
+    ok("G(c) 拒绝理由点明两者都没有", r.text.includes("既没有本工具标记注释") && r.text.includes("sidecar"), r.text)
+    ok("G(c) 给出该 id 规则原文", r.text.includes('"resource": "windows-shell"'), r.text)
+    ok("G(c) 拒绝时不动文件", fs.readFileSync(CFG).equals(before))
+  }
+
+  // (b) 无标记但 sidecar 有记录且恰好一条完全相同 → 删除并告警
+  {
+    cfgsWrite('{\n  "permissions": [\n    { "action": "skill", "resource": "windows-shell", "effect": "deny" }\n  ]\n}\n')
+    mod.saveSidecar(tmpConfigDir, {
+      rules: [{ id: "windows-shell", effect: "deny", file: CFG, insertedAt: new Date().toISOString(), createdBlock: true }],
+    })
+    const r = await call("enable", { id: "windows-shell" })
+    ok("G(b) 无标记 + sidecar 唯一匹配 → 删除成功", r.text.includes("✅"), r.text)
+    ok("G(b) 删除时告警", r.text.includes("⚠️"), r.text)
+    ok("G(b) 来源标注为 sidecar 记录", r.text.includes("sidecar 记录"), r.text)
+  }
+
+  // 歧义：同一 id 两条精确规则 → 拒绝并列出全部候选
+  {
+    cfgsWrite(
+      '{\n  "permissions": [\n' +
+        '    { "action": "skill", "resource": "windows-shell", "effect": "deny" } // skill_management\n' +
+        '    ,{ "action": "skill", "resource": "windows-shell", "effect": "deny" }\n' +
+        '  ]\n}\n',
+    )
+    mod.saveSidecar(tmpConfigDir, { rules: [{ id: "windows-shell", effect: "deny", file: CFG, insertedAt: new Date().toISOString() }] })
+    const before = fs.readFileSync(CFG)
+    const r = await call("enable", { id: "windows-shell" })
+    ok("G 歧义（同 id 两条）→ 拒绝执行", r.text.includes("拒绝执行") && r.text.includes("无法唯一定位"), r.text)
+    ok("G 歧义 → 列出全部候选（两条原文）", (r.text.match(/"resource": "windows-shell"/g) || []).length === 2, r.text)
+    ok("G 歧义 → 不动文件", fs.readFileSync(CFG).equals(before))
+  }
+
+  // 挡路的是通配规则 → 拒绝，报告出处
+  {
+    cfgsWrite('{\n  "permissions": [\n    { "action": "skill", "resource": "*", "effect": "deny" }\n  ]\n}\n')
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    const r = await call("enable", { id: "windows-shell" })
+    ok("G 通配 deny → 拒绝删除", r.text.includes("拒绝执行") && r.text.includes("挡路的不是这一行"), r.text)
+    ok("G 通配 deny → 指出命中的规则原文", r.text.includes('"resource": "*"'), r.text)
+    ok("G 通配 deny → 不动文件", fs.readFileSync(CFG).toString("utf8").includes('"resource": "*"'))
+  }
+
+  // 挡路的是 agent 级 permissions（配置里没有该规则）→ 拒绝，报告出处
+  {
+    cfgsWrite(ORIGINAL)
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    const r = await callWith(
+      { agentRules: { build: [{ action: "skill", resource: "windows-shell", effect: "deny" }] } },
+      "enable",
+      { id: "windows-shell" },
+    )
+    ok("G agent 级 deny → 拒绝删除", r.text.includes("拒绝执行") && r.text.includes("挡路的不是这一行"), r.text)
+    ok("G agent 级 deny → 指出调用者与规则", r.text.includes("`build`") && /"resource"\s*:\s*"windows-shell"/.test(r.text), r.text)
+    ok("G agent 级 deny → 不动文件", fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")))
+  }
+
+  // 删除后仍被更宽的规则压成 deny → 必须写明，不能只报「已删除」
+  {
+    cfgsWrite(
+      '{\n  "permissions": [\n' +
+        '    { "action": "skill", "resource": "*", "effect": "deny" },\n' +
+        '    { "action": "skill", "resource": "windows-shell", "effect": "deny" } // skill_management\n' +
+        '  ]\n}\n',
+    )
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    const r = await call("enable", { id: "windows-shell" })
+    ok("G 删除成功但仍是 deny：仍报告 ✅ 删除", r.text.includes("✅"), r.text)
+    ok("G 删除成功但仍是 deny：写明仍为 deny 及原因", /删除后的生效效果[\s\S]*deny[\s\S]*仍为 deny[\s\S]*"resource"\s*:\s*"\*"/.test(r.text), r.text)
+    ok("G 删除成功但仍是 deny：目标规则确实被删", !fs.readFileSync(CFG).toString("utf8").includes('"resource": "windows-shell"'))
+  }
+
+  // §11.3 description 硬化
+  {
+    const ctx = makeCtx()
+    await mod.default.setup(ctx)
+    const tool = ctx.__tools.find((t) => t.name === "skill_management")
+    ok("G description 声明为原生工具、直接按名字调用", /native tool/i.test(tool.description) && /by name/i.test(tool.description), tool.description)
+    ok("G description 明确不要在 Code Mode 里找它", /Code Mode/.test(tool.description) && /search\(\)/.test(tool.description), tool.description)
+    ok("G description 说明 enable 不要求是本工具写的", /whoever wrote it/.test(tool.description), tool.description)
+    ok("G codemode 维持 false", tool.options && tool.options.codemode === false)
+  }
+
+  cfgsWrite(ORIGINAL)
+  mod.saveSidecar(tmpConfigDir, { rules: [] })
 }
 
 console.log(`\n${"─".repeat(60)}`)

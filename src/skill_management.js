@@ -26,7 +26,9 @@ const PLUGIN_ID = "skill_management"
 const MARKER = "skill_management" // 归属标记（same-line trailing comment）
 const SIDECAR_BASENAME = "skill_management.state.json"
 const BACKUP_DIRNAME = "skill_management.backups"
-const MAX_BACKUPS = 10
+// §11.2：只留 1 份。备份是目标文件的逐字节副本，而该文件常含 MCP 凭据，副本越少越好；
+// 「跨会话后悔药」由原子写 + 进程内失败回滚覆盖。
+const MAX_BACKUPS = 1
 const SIDECAR_VERSION = 1
 const PERMISSION_ACTION = "skill" // 宿主对 skill 的权限 action 字面量
 
@@ -380,35 +382,35 @@ export function removePermissionsBlockIfEmpty(text) {
 
 /** 找到携带本工具标记、且 resource === id 的数组项 */
 export function findMarkedItem(text, id) {
-  const root = parseJsonc(text)
-  const perm = findTopLevelProp(root, "permissions")
-  if (!perm || perm.value.type !== "array") return undefined
-  for (const item of perm.value.items) {
-    if (item.type !== "object") continue
-    const res = findTopLevelProp(item, "resource")
-    if (!res || res.value.value !== id) continue
-    const { le } = lineBounds(text, item.start)
-    const tail = text.slice(item.end, le)
-    if (tail.includes(MARKER)) return item
-  }
+  for (const item of findAllExactItems(text, id)) if (itemHasMarker(text, item)) return item
   return undefined
 }
 
-/** 在没有标记时，按"完全相同的三元组且全局唯一"定位 */
-export function findExactItem(text, id, effect) {
+/** 列出配置里所有"精确命中该 id 的全局规则"（action 匹配 skill）—— 歧义判据用 */
+export function findAllExactItems(text, id) {
   const root = parseJsonc(text)
   const perm = findTopLevelProp(root, "permissions")
-  if (!perm || perm.value.type !== "array") return undefined
+  if (!perm || perm.value.type !== "array") return []
   const hits = []
   for (const item of perm.value.items) {
     if (item.type !== "object") continue
     const a = findTopLevelProp(item, "action")
     const r = findTopLevelProp(item, "resource")
-    const e = findTopLevelProp(item, "effect")
-    if (!a || !r || !e) continue
-    if (a.value.value === PERMISSION_ACTION && r.value.value === id && e.value.value === effect) hits.push(item)
+    if (!a || !r) continue
+    if (typeof a.value.value === "string" && globMatch(a.value.value, PERMISSION_ACTION) && r.value.value === id) hits.push(item)
   }
-  return hits.length === 1 ? hits[0] : undefined
+  return hits
+}
+
+/** 该数组项是否带本工具标记（§4.3：标记写在规则所在行的行尾） */
+export function itemHasMarker(text, item) {
+  const { le } = lineBounds(text, item.start)
+  return text.slice(item.end, le).includes(MARKER)
+}
+
+export function itemTriple(item) {
+  const g = (k) => findTopLevelProp(item, k)?.value.value
+  return { action: g("action"), resource: g("resource"), effect: g("effect") }
 }
 
 /**
@@ -464,7 +466,21 @@ export function readTextFile(file) {
 
 export function writeTextFile(file, text, bom) {
   fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, (bom ? "\ufeff" : "") + text, "utf8")
+  // §11.2：原子写 —— 同目录先写 <file>.tmp，再 rename 覆盖。
+  // rename 在同一文件系统内是原子的，因此不会出现「写到一半被截断」的中间状态；
+  // 这也是把备份降到 1 份的前提（与宿主的配置写入方式一致）。
+  const tmp = `${file}.tmp`
+  try {
+    fs.writeFileSync(tmp, (bom ? "\ufeff" : "") + text, "utf8")
+    fs.renameSync(tmp, file)
+  } catch (err) {
+    try {
+      fs.rmSync(tmp, { force: true })
+    } catch {
+      /* 清理临时文件失败不覆盖原始错误 */
+    }
+    throw err
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -902,7 +918,7 @@ async function actList(ctx) {
     if (unrecorded.length > 0) {
       lines.push("")
       lines.push(
-        `ℹ️ 配置里有 ${unrecorded.length} 条 \`skill\` 规则在 sidecar 里没有记录：${unrecorded.map((u) => `\`${u.resource}\`(${u.effect})`).join("、")}（可能为手工添加；\`enable\` 只删带标记注释的规则）`,
+        `ℹ️ 配置里有 ${unrecorded.length} 条 \`skill\` 规则在 sidecar 里没有记录：${unrecorded.map((u) => `\`${u.resource}\`(${u.effect})`).join("、")}（可能为手工添加；\`enable\` 需要标记注释或 sidecar 记录才能唯一确认要删的那一条）`,
       )
     }
   }
@@ -1129,6 +1145,91 @@ async function actDisable(ctx, idRaw, nameRaw, effectRaw, dryRun) {
   return out.join("\n")
 }
 
+function countExactRules(rules, id, effect) {
+  return ensureArray(rules).filter(
+    (r) =>
+      r &&
+      r.resource === id &&
+      (effect === undefined || r.effect === effect) &&
+      typeof r.action === "string" &&
+      globMatch(r.action, PERMISSION_ACTION),
+  ).length
+}
+
+/**
+ * §11.1：删除一条精确规则后的回读校验。
+ * 判据不是「调用者现在不是 deny」（删完仍可能被更宽的规则挡住，那是要**报告**的结果），
+ * 而是「调用者的规则集里该三元组的条数确实减少了」—— 说明宿主已重新读入这次删除。
+ */
+async function verifyRuleRemoved(ctx, id, effect, beforeCount, callerAgentId) {
+  const timeoutMs = Number(process.env.SKILL_MGMT_VERIFY_TIMEOUT_MS ?? 6000)
+  const deadline = Date.now() + (Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 6000)
+  let polls = 0
+  let per = []
+  for (;;) {
+    polls++
+    try {
+      if (typeof ctx.agent?.reload === "function") await ctx.agent.reload()
+    } catch {
+      /* reload 不可用就只靠轮询等待 */
+    }
+    let agents = []
+    try {
+      agents = await readDomainList(ctx, "agent")
+    } catch {
+      agents = []
+    }
+    if (agents.length > 0) {
+      per = agents.map((a) => {
+        const rules = ensureArray(a.permissions)
+        return {
+          id: a.id,
+          count: countExactRules(rules, id, effect),
+          effect: stateOf(rules, id).effect,
+        }
+      })
+      const picked = per.find((p) => p.id === callerAgentId) ?? per.find((p) => !p.hidden) ?? per[0]
+      if (picked && picked.count < beforeCount) {
+        return {
+          ok: true,
+          caller: picked.id,
+          postEffect: picked.effect,
+          diverged: per.filter((p) => p.effect !== picked.effect),
+          via: `ctx.agent.reload() + ctx.agent.list()（轮询 ${polls} 次）`,
+          polls,
+        }
+      }
+    }
+    if (Date.now() >= deadline) {
+      return {
+        ok: false,
+        actual: per.length > 0 ? per.map((p) => `${p.id}=${p.effect}×${p.count}`).join(", ") : "未验证（拿不到 agent 规则集）",
+        via: `ctx.agent.reload() + ctx.agent.list()（轮询 ${polls} 次后超时）`,
+        polls,
+      }
+    }
+    await sleep(200)
+  }
+}
+
+/** 拒绝时用：指出调用者规则集里实际命中的规则（谁挡的路） */
+function describeCallerHit(agents, callerAgentId, id) {
+  const caller = pickAgent(agents, callerAgentId)
+  const rules = ensureArray(caller?.permissions)
+  const hit = stateOf(rules, id)
+  if (hit.index < 0) {
+    return { caller: caller?.id ?? "(未知)", text: "调用者规则集里没有命中规则（宿主会回退 ask）。" }
+  }
+  const kind =
+    hit.rule.resource === id
+      ? "精确命中该 id（来自 agent 级 `permissions` 或未写入本工具目标文件的规则）"
+      : "更宽的规则（通配 `resource`，或 agent 级 `permissions` / `policies`）"
+  return {
+    caller: caller?.id ?? "(未知)",
+    text: `调用者 agent \`${caller?.id ?? "(未知)"}\` 的规则集 rules[${hit.index}] = \`${JSON.stringify(hit.rule)}\` —— ${kind}。本工具只报告，不代改。`,
+  }
+}
+
 async function actEnable(ctx, idRaw, nameRaw, dryRun) {
   const { skills, agents } = await readContext(ctx)
   const agentId = ctx.__agentId
@@ -1137,70 +1238,128 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
   if (resolved.error) return resolved.error
   const id = resolved.id
 
+  const callerAgent = pickAgent(agents, agentId)
+  const callerName = callerAgent?.id ?? "(未知)"
+  const callerRules = ensureArray(callerAgent?.permissions)
+  const before = stateOf(callerRules, id)
+
   const target = resolveTargetConfig()
   const side = loadSidecar(target.configDir)
   const record = side.rules.find((r) => r.id === id)
-  const file = record?.file && isFile(record.file) ? record.file : target.file
-  const { text, bom } = readTextFile(file)
+
+  // 候选文件：解析出的目标配置 + sidecar 记录的文件（去重）。
+  const files = [...new Set([target.file, record?.file && isFile(record.file) ? record.file : null].filter(Boolean))]
+  const docs = []
+  for (const f of files) {
+    try {
+      const { text, bom } = readTextFile(f)
+      docs.push({ file: f, text, bom })
+    } catch {
+      /* 读不到的文件跳过；结论只来自实际读到的内容 */
+    }
+  }
 
   const out = []
   out.push(`目标：\`${id}\``)
-  out.push(`目标文件：\`${file}\``)
+  out.push(`调用者 agent：\`${callerName}\`（当前效果：${before.effect}）`)
+  out.push(`目标文件：${files.map((f) => `\`${f}\``).join("、")}`)
 
-  // 归属判定：**sidecar 有记录**是前提（规范/需求原文："if sidecar has no record, refuses execution"）。
-  // 标记注释只用于在该 id 可能有多条同类规则时精确定位"本工具写的那一条"。
-  if (!record) {
+  // 候选项 = 精确命中该 id、且效果为 deny/ask 的规则（allow 不是「挡路的规则」，不删）。
+  const candidates = []
+  for (const d of docs) {
+    for (const item of findAllExactItems(d.text, id)) {
+      const triple = itemTriple(item)
+      if (triple.effect === "deny" || triple.effect === "ask") candidates.push({ ...d, item, triple })
+    }
+  }
+
+  if (candidates.length === 0) {
     out.push("")
-    out.push(`❌ 拒绝执行：sidecar \`${sidecarPath(target.configDir)}\` 里没有 \`${id}\` 的记录。`)
-    out.push("也就是说这条规则不是本工具写的（或 sidecar 丢失/被清空）。本工具**不擅自删除**非自己写入的规则。")
-    const perm = findTopLevelProp(parseJsonc(text), "permissions")
-    if (perm && perm.value.type === "array") {
-      const exact = perm.value.items.filter((it) => {
-        const r = findTopLevelProp(it, "resource")
-        return r && r.value.value === id
-      })
-      if (exact.length > 0) {
+    if (before.effect === "deny") {
+      // §11.1 第 2 类：挡路的不是「这一行」，只报告不代改。
+      out.push("❌ 拒绝执行：配置里没有精确命中该 id 的全局规则 —— 挡路的不是这一行，删无可删。")
+      out.push(describeCallerHit(agents, agentId, id).text)
+      out.push("若命中的是 `policies` / `experimental.policies`，本工具无法读取（插件 ctx 没有 `config` 域），请手工核对。")
+      const related = []
+      for (const d of docs) {
+        for (const item of findAllExactItems(d.text, id)) related.push({ file: d.file, text: d.text, item })
+        // 更宽的规则也算「相关」：resource 的 glob 能匹配该 id
+        const root = parseJsonc(d.text)
+        const perm = findTopLevelProp(root, "permissions")
+        if (perm && perm.value.type === "array") {
+          for (const item of perm.value.items) {
+            if (item.type !== "object" || related.some((r) => r.item === item && r.file === d.file)) continue
+            const t = itemTriple(item)
+            if (typeof t.action === "string" && globMatch(t.action, PERMISSION_ACTION) && typeof t.resource === "string" && globMatch(t.resource, id)) {
+              related.push({ file: d.file, text: d.text, item })
+            }
+          }
+        }
+      }
+      if (related.length > 0) {
         out.push("")
-        out.push("配置里与 `" + id + "` 相关的规则（请自行确认后手工处理）：")
-        for (const it of exact) {
-          const { ls, le } = lineBounds(text, it.start)
+        out.push("配置里与该 id 相关的规则（原文）：")
+        for (const r of related) {
+          const { ls, le } = lineBounds(r.text, r.item.start)
+          out.push(`- \`${r.file}\``)
           out.push("```jsonc")
-          out.push(text.slice(ls, le).trim())
+          out.push(r.text.slice(ls, le).trim())
           out.push("```")
         }
-      } else {
-        out.push("")
-        out.push("配置里也没有与该 id 相关的规则 —— 无事可做。")
       }
+    } else {
+      out.push(`配置里没有精确命中该 id 的 deny/ask 规则，无需修改（当前效果：${before.effect}）。`)
     }
     return out.join("\n")
   }
 
-  let item = findMarkedItem(text, id)
-  let how = "sidecar 有记录 + 命中本工具标记注释"
-  let warn = false
-  if (!item) {
-    // 次选：sidecar 有记录，且配置里恰好存在一条完全相同的三元组（标记可能被外部写者剥掉）
-    const guess = record.effect ?? "deny"
-    item = findExactItem(text, id, guess)
-    if (item) {
-      how = `sidecar 有记录，但未找到标记注释；配置里恰好有一条完全相同的规则（${guess}）`
-      warn = true
-    }
-  }
-  if (!item) {
+  if (candidates.length > 1) {
+    // §11.1 第 2 类：歧义。宿主按 findLast 求值，删错那条会「看起来成功但行为没变」。
     out.push("")
-    out.push(`❌ 拒绝执行：sidecar 有 \`${id}\` 的记录，但在配置里既找不到本工具的标记注释，也找不到唯一匹配的规则（可能已被手工改写）。`)
-    out.push("不擅自猜测要删哪一条。请手工处理后再重试。")
+    out.push(`❌ 拒绝执行：配置里有 ${candidates.length} 条精确命中 \`${id}\` 的规则，无法唯一定位（宿主求值是最后一条命中算数）。`)
+    out.push("候选（请自行确认后手工处理）：")
+    for (const c of candidates) {
+      const { ls, le } = lineBounds(c.text, c.item.start)
+      out.push(`- \`${c.file}\``)
+      out.push("```jsonc")
+      out.push(c.text.slice(ls, le).trim())
+      out.push("```")
+    }
     return out.join("\n")
   }
 
-  const { ls, le } = lineBounds(text, item.start)
+  const hit = candidates[0]
+  const marked = itemHasMarker(hit.text, hit.item)
+  let how
+  let origin
+  let warn = false
+  if (marked) {
+    // (a) 标记注释是文件内自证，优先级最高 —— 即使 sidecar 丢失也认。
+    how = "标记注释命中（文件内自证）"
+    origin = "本工具写入（同行标记注释）"
+  } else if (record && (record.effect ?? "deny") === hit.triple.effect) {
+    // (b) 无标记，但 sidecar 有该 id 的记录且配置里恰好一条完全相同的三元组。
+    how = `sidecar 有 \`${id}\` 的记录，且配置里恰好一条完全相同的规则（${hit.triple.effect}）`
+    origin = "本工具写入（sidecar 记录；标记已缺失）"
+    warn = true
+  } else {
+    // (c) 两者都没有 → 拒绝，并给出原文。
+    out.push("")
+    out.push(`❌ 拒绝执行：既没有本工具标记注释，也没有 sidecar 记录能确认这条规则。`)
+    out.push(`配置 \`${hit.file}\` 里精确命中该 id 的规则（原文，请自行确认后手工处理）：`)
+    const { ls, le } = lineBounds(hit.text, hit.item.start)
+    out.push("```jsonc")
+    out.push(hit.text.slice(ls, le).trim())
+    out.push("```")
+    return out.join("\n")
+  }
+
+  const { ls, le } = lineBounds(hit.text, hit.item.start)
   out.push(`定位方式：${how}`)
   out.push("")
   out.push("将删除：")
   out.push("```jsonc")
-  out.push(text.slice(ls, le).trim())
+  out.push(hit.text.slice(ls, le).trim())
   out.push("```")
 
   if (dryRun) {
@@ -1209,31 +1368,51 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
     return out.join("\n")
   }
 
-  let nextText = removeRuleByLine(text, item)
+  let nextText = removeRuleByLine(hit.text, hit.item)
   let cleanedEmptyBlock = false
-  if (record?.createdBlock) {
-    const cleaned = removePermissionsBlockIfEmpty(nextText)
-    if (cleaned !== null) {
-      nextText = cleaned
-      cleanedEmptyBlock = true
-    }
+  const cleaned = removePermissionsBlockIfEmpty(nextText)
+  if (cleaned !== null) {
+    nextText = cleaned
+    cleanedEmptyBlock = true
   }
-  backupFile(file, target.configDir)
-  writeTextFile(file, nextText, bom)
+  backupFile(hit.file, target.configDir)
+  writeTextFile(hit.file, nextText, hit.bom)
 
-  const verified = await verifyEffect(ctx, id, null, pickAgent(agents, agentId)?.id)
+  const beforeCount = countExactRules(callerRules, id, hit.triple.effect)
+  const verified = await verifyRuleRemoved(ctx, id, hit.triple.effect, beforeCount, callerAgent.id)
   if (!verified.ok) {
-    writeTextFile(file, text, bom)
-    return out.join("\n") + `\n\n❌ 回读校验失败（期望不再是 deny，实际 ${verified.actual}）；已回滚。`
+    writeTextFile(hit.file, hit.text, hit.bom)
+    return out.join("\n") + `\n\n❌ 回读校验失败（调用者规则集里该规则未减少：${verified.actual}）；已回滚。`
   }
 
   side.rules = side.rules.filter((r) => r.id !== id)
   const sideFile = saveSidecar(target.configDir, side)
 
   out.push("")
-  if (warn) out.push(`⚠️ 该规则没有本工具标记（可能被外部写者剥掉过注释），已按 sidecar 记录删除；建议核对一次配置。`)
-  if (cleanedEmptyBlock) out.push("已把因此变空的 `permissions` 块一并清理（该块由本工具新建）。")
+  if (warn)
+    out.push(
+      `⚠️ 该规则没有本工具标记（可能被外部写者剥掉过注释），已按 sidecar 记录删除；建议核对一次配置。`,
+    )
+  if (cleanedEmptyBlock) out.push("已把因此变空的 `permissions` 块一并清理。")
   out.push(`✅ 已删除并校验通过（${verified.via}）。sidecar：\`${sideFile}\``)
+  out.push(`- 被删规则的来源：${origin}`)
+  out.push(`- **删除后的生效效果**：调用者 agent \`${verified.caller}\` = **${verified.postEffect}**`)
+  if (verified.postEffect === "deny") {
+    let fresh = []
+    try {
+      fresh = await readDomainList(ctx, "agent")
+    } catch {
+      fresh = []
+    }
+    out.push(
+      `  - 仍为 deny：挡路的不是被删的这一行 —— ${describeCallerHit(fresh.length > 0 ? fresh : agents, agentId, id).text}`,
+    )
+  }
+  if (verified.diverged && verified.diverged.length > 0) {
+    out.push(
+      `ℹ️ 另有 ${verified.diverged.length} 个 agent 结果不同（它们用自己的后续规则覆盖了全局规则）：${verified.diverged.map((d) => `\`${d.id}\`=${d.effect}`).join("、")}`,
+    )
+  }
   return out.join("\n")
 }
 
@@ -1326,11 +1505,13 @@ const DESCRIPTION = [
   "List, inspect, enable or disable installed OpenCode skills.",
   "`list` shows every registered skill with its effective state (available / disabled / ask).",
   "`disable` adds one permission rule to the GLOBAL config so the skill is hidden from the model and its loading is rejected — it never touches skill files.",
-  "`enable` removes the rule this tool added (refuses if the rule was not written by this tool).",
+  "`enable` removes the blocking global rule for that skill, whoever wrote it.",
   "",
   "Semantics: deny = hidden from the model-visible skill list AND loading via the `skill` tool is rejected (granularity = skill id). ask = stays listed, asks for confirmation when loaded. disable writes deny by default; pass effect:\"ask\" for a soft disable.",
-  "Agent-level `agents.<id>.permissions` and `policies` can also remove a skill; this tool only reports them, never writes them.",
+  "`enable` deletes the one exact global rule for that id. It refuses when the rule cannot be uniquely identified (several matching rules) or when the blocker is a wildcard rule / an agent-level `agents.<id>.permissions` / a policy — those are only reported, never edited.",
   "Use when the user asks which skills are installed, why one is not available, or wants one turned off or on.",
+  "",
+  "This is a **native tool**: call it directly by name; do not look for it with Code Mode `search()` / `execute`.",
 ].join("\n")
 
 const INPUT_SCHEMA = {
@@ -1342,7 +1523,7 @@ const INPUT_SCHEMA = {
         { const: "list", description: "列出所有已注册 skill 及其有效状态；不需要其它参数" },
         { const: "inspect", description: "查单个 skill 的详情与不可用原因；需要 id（或 name）" },
         { const: "disable", description: "停用：写一条全局权限规则，使其对模型隐藏且拒绝加载；需要 id（或 name）" },
-        { const: "enable", description: "恢复：删除本工具此前写入的那条规则；需要 id（或 name）" },
+        { const: "enable", description: "恢复：删除挡路的那一条精确全局规则（不要求是本工具写的）；需要 id（或 name）" },
       ],
       description: "要执行的动作",
     },

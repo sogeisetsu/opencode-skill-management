@@ -106,32 +106,41 @@ opencode plugin list --builtin
 - `inspect` 明确报告**反推过程**：来源（注册表直接给出 / 由路径反推）、推导规则原文、`dirname`/`basename` 规则输入、实际使用的路径字段（`path` 或 `location`）。
 - 反推得到的 `id` 参与权限求值（不是 `unknown`）。
 
-### B. `enable` 的归属门是 fail-closed
+### B. `enable` 的定位判据（v5 放宽）
 
-**通过。** 需求原文是 "if sidecar has no record, refuses execution"。实测（验收脚本 + 真实宿主）：
+**通过**（验收脚本 G 段 + F 段）。判据从「sidecar 必须有记录」改为「能否唯一定位挡路的那一条精确全局规则」：
 
 | 场景 | 行为 |
 |---|---|
-| sidecar 有记录 + 命中本工具标记注释 | ✅ 精确删除（真实宿主输出：`定位方式：sidecar 有记录 + 命中本工具标记注释`） |
-| sidecar 有记录，标记被剥掉，且恰好一条完全匹配 | ✅ 删除并 `⚠️` 告警 |
-| **sidecar 无记录**（即使规则带本工具标记） | ❌ **拒绝执行**，并列出该 id 相关规则原文 |
-| sidecar 无记录 且 配置里也没有该 id 的规则 | ❌ 拒绝，并说明"无事可做" |
+| 标记注释命中（sidecar 有无都不影响） | ✅ 精确删除，来源标注「本工具写入（同行标记注释）」 |
+| 无标记，sidecar 有记录且恰好一条完全相同 | ✅ 删除并 `⚠️` 告警 |
+| **sidecar 丢失、标记还在** | ✅ **仍然删除成功**（旧行为会拒绝；这是 v5 的主要动机） |
+| 标记与 sidecar 都没有 | ❌ 拒绝，并列出该 id 相关规则原文 |
+| 同一 id 两条精确规则（歧义） | ❌ 拒绝，列出全部候选 |
+| 挡路的是 `resource:"*"` / agent 级 `permissions` / `policies` | ❌ 只报告不代改，指出调用者 agent 与命中规则 |
+| 删除后仍被更宽规则压成 `deny` | ✅ 仍报删除成功，但写明「删除后的生效效果 = deny」及挡路规则 |
 
-> 取舍说明：把 sidecar 记录作为前置条件（而不是"有标记就删"）意味着 **sidecar 丢失时工具会拒绝撤销自己的改动**，需要用户手工处理。
-> 这是需求明确要求的行为，也是更保守的一侧（宁可拒绝，不可误删）。真实宿主回归已确认正常路径不受影响。
+> 成功路径统一输出「被删规则的来源」与「删除后的生效效果」，不把「已删除」当成「已可用」。
 
-### 真实宿主回归（新构建）
+### 写入策略（v5）
+
+- 原子写：同目录 `.tmp` + `renameSync`，验收断言写入后无 `.tmp` 残留。
+- 备份滚动只保留 **1 份**（配置文件含 MCP 凭据，副本越少越好）；多次写入后断言仍为 1 份。
+
+### 真实宿主回归（v4 构建 · 历史记录）
+
+> v5 的新 `enable` 路径尚未在真实宿主新进程里回归（发布阶段一并跑）；以下为 v4 实测，写入/还原机制未变。
 
 | 步骤 | 结果 |
 |---|---|
 | `disable grill-me` | ✅ 回读校验通过（轮询 3 次）；`7D16F8A3…` → `B1F5BA17…` |
-| `enable grill-me` | ✅ `定位方式：sidecar 有记录 + 命中本工具标记注释`；清空空块；回读校验通过 |
+| `enable grill-me` | ✅ 命中标记注释并精确删除；清空空块；回读校验通过 |
 | 还原 | **逐字节一致** 回到 `7D16F8A3…`；sidecar 回到 `{"version":1,"rules":[]}` |
 
 ## 复跑方式
 
 ```pwsh
-node tools/verify.mjs        # 136 项断言，跑在临时配置目录，不触碰真实配置
+node tools/verify.mjs        # 167 项断言，跑在临时配置目录，不触碰真实配置
 node tools/install.mjs       # 幂等安装到 <config>/plugins/
 ```
 
@@ -145,9 +154,9 @@ opencode run --standalone --auto --format json 'Do NOT use the execute/code-mode
 
 ## 已知副作用（需要你知情）
 
-1. **备份会复制配置文件**：每次写前备份到 `<config>/skill_management.backups/opencode.jsonc.<时间戳>.bak`（滚动保留 10 份）。
-   配置文件里含 MCP 凭据（如 `Authorization: Bearer …`），所以**这些备份等于把凭据多复制了几份**。
-   不想要的话可以把 `MAX_BACKUPS` 调小 / 改成只读不备份 —— 说一声我改。
+1. **备份会复制配置文件**：每次写前备份到 `<config>/skill_management.backups/opencode.jsonc.<时间戳>.bak`（滚动只保留 **1 份**）。
+   配置文件里含 MCP 凭据（如 `Authorization: Bearer …`），所以备份仍然是一份凭据副本；v5 已把副本数从 10 降到 1。
+   不想要的话可以把 `MAX_BACKUPS` 调成 0 / 改成只读不备份 —— 说一声我改。
 2. **`codemode:false` 的取舍**：工具进原生表（模型可直接按名字调用，已实测），但不在 Code Mode 目录里，
    Code-Mode 倾向的模型可能误判"工具不存在"。改成 `codemode:true` 可以规避，代价是受 Code Mode 目录大小限制。
 3. 每次读注册表会注册并立即 dispose 一个 `transform` hook（不留残留），这是宿主 2.0.32 上拿到注册表数组的唯一途径。

@@ -139,3 +139,9 @@ await reg.dispose()                                                            /
 
 - **不声明 `output` 就绝不能返回 `output` 字段**：宿主会报 `Tool result declared output without an output schema`。本插件只返回 `{ content }`。
 - 工具执行期上下文是 `{ …ctx, signal, progress(cb) }`，**没有 `directory`/`worktree`**（活样板注释原文："OpenCode 2 no longer hands a tool its session directory"）。
+
+### 5. v5 实现变更（2026-10-19）
+
+- **`enable` 判据放宽**：先看同行标记注释（文件内自证），再看 sidecar 记录，两者都没有才拒绝。回读校验的判据改为「调用者规则集里该三元组的条数确实减少」，因此删完仍被更宽规则压成 `deny` 时**不判失败**，而是照常报告实际效果与挡路规则。
+- **写入原子化**：同目录 `<file>.tmp` → `fs.renameSync` 覆盖（Windows / Linux 均由 Node 的 `rename` 提供替换语义）；备份滚动只保留 **1 份**。
+- 以上均由 `tools/verify.mjs` 的 G 段断言覆盖（167 项全绿）；**新 `enable` 路径的真实宿主新进程回归待发布阶段一并跑**。

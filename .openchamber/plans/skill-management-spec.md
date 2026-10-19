@@ -1,11 +1,11 @@
 # `skill_management` 工具规范（v4 · 基于 2.0.32 源码实证）
 
-> 状态：**已实现并通过验收**（Windows · 2.0.32；`tools/verify.mjs` 136 项断言 + 真实宿主端到端）。**§11 的变更尚未实现**，正文与之冲突处以 §11 为准（§3.4 / §4.2 / §5 / §7 已按 §11 预改）。
+> 状态：**已实现并通过验收**（Windows · 2.0.32；`tools/verify.mjs` 167 项断言 + 真实宿主端到端）。**§11 的三项变更已实现**（见 §11.6 的验收证据），只剩发布通道（CI 发布 + rc 运行时加载）待跑。正文与之冲突处以 §11 为准。
 > 基准宿主：本机 **OpenCode v2.0.32**（`opencode --version` 实跑）
 > **真源规则（硬性）**：一切接口结论以 **(a) 宿主二进制内嵌源码** 与 **(b) 实跑 `opencode debug *`** 为唯一真源。
 > `<config>/node_modules/@opencode-ai/*` 下的类型定义**只作参考，不得作为结论依据** —— 本机装的是 `@opencode-ai/plugin@1.18.18` / `@opencode-ai/sdk@1.18.18`，与宿主 2.0.32 已漂移（§1.3 有三处实证）。
 > 复核方式：结论旁内联标注出处与 **已证实 / 待实测**；宿主升级后按 §9 重新核对，不沿用旧结论。
-> 文末 §10 是相对上一版（v3）的改动清单；**§11 是已定但未实现的下一批变更**。
+> 文末 §10 是相对上一版（v3）的改动清单；**§11 是 v5 变更（已实现）**。
 
 ---
 
@@ -15,7 +15,7 @@
 - [x] 实现只读动作：`list` + `inspect`
 - [x] 实现写动作：`disable` + `enable`（标记注释 · 备份 · dryRun · 回读校验 · 回滚 · sidecar 审计）
 - [x] 按 §7 跑脚本化验收（本机 Windows 全项；Linux 未跑，见 §11）
-- [ ] §11 变更落地：`enable` 判据放宽 · 备份 1 份 + 原子写 · description 硬化，并补断言
+- [x] §11 变更落地：`enable` 判据放宽 · 备份 1 份 + 原子写 · description 硬化，并补断言（167 项全绿）
 - [ ] CI（Windows + Linux 双跑）· 发布 npm（`plugin add` 的**运行时**加载待验）
 
 ---
@@ -320,7 +320,7 @@ eF = o({ id: kp, name: Jb, description: t.pipe(y), autoinvoke: k.pipe(y), path: 
 
 ### 3.4 `enable`
 
-> **本节为 §11 变更，尚未实现。** 实现前的行为是「sidecar 里没有该 id 的记录 → 一律拒绝（fail-closed）」。
+> **本节为 §11 变更，已实现。** 实现前的行为是「sidecar 里没有该 id 的记录 → 一律拒绝（fail-closed）」；现在的行为见下（§11.6 有验收证据）。
 
 **判据不是「这条规则是谁写的」，而是「挡路的这条规则能否被唯一确定」。** 用户调 `enable`，意图就是让该 skill 可用；因此只要挡路的是一条**精确命中该 id 的全局规则**（`action` 匹配 `skill`、`resource` 恰好等于该 id），就删掉它。归属只决定**报告的措辞**，不决定**做不做**。
 
@@ -451,8 +451,8 @@ let Re = [...xx(e.tools, r), ...Px(e.permission, r), ...NH(e.permissions, fZ, ["
   let T = ym(Ne, bm(Ne, ["shell"], xe.shell ?? void 0, { formattingOptions: { tabSize: 2, insertSpaces: !0 } }));
   ```
   → 写盘保留 `bm`/`ym` 这类"构造编辑 + 应用编辑"的思路，能天然保住注释。
-- 落盘用 `tmp` + `rename` 是**宿主的做法**（`let s = e + ".tmp"; await k(s, i…); …rename`）。本工具**改为同样方式（§11 变更，尚未实现）**：同目录写 `<file>.tmp` → `fs.renameSync` 覆盖。`rename` 在同文件系统内是原子的，因此不存在"写到一半被截断"的中间状态 —— 这也是把备份降为"1 份兜底"的前提。
-- **备份策略（§11 变更，尚未实现）**：写前把目标文件复制到 `<config>/skill_management.backups/`，**滚动只保留 1 份**。备份是目标文件的**逐字节完整副本**，不写任何元数据（出处只记 sidecar）。
+- 落盘用 `tmp` + `rename` 是**宿主的做法**（`let s = e + ".tmp"; await k(s, i…); …rename`）。本工具**同样方式（§11.2 已实现）**：同目录写 `<file>.tmp` → `fs.renameSync` 覆盖。`rename` 在同文件系统内是原子的，因此不存在"写到一半被截断"的中间状态 —— 这也是把备份降为"1 份兜底"的前提。
+- **备份策略（§11.2 已实现）**：写前把目标文件复制到 `<config>/skill_management.backups/`，**滚动只保留 1 份**。备份是目标文件的**逐字节完整副本**，不写任何元数据（出处只记 sidecar）。
   > 收紧理由：该文件含 MCP 凭据（本机实测备份目录里 6 份副本各含 1 处 `Bearer`），副本越少越好；而"跨会话后悔药"由原子写 + 内存回滚基本覆盖。
 - 只操作 `permissions` 数组里属于本工具的条目。
 
@@ -553,7 +553,7 @@ let Re = [...xx(e.tools, r), ...Px(e.permission, r), ...NH(e.permissions, fZ, ["
 5. **`enable` 还原**：`enable` 后同一组断言反向成立；前后 diff 干净；`opencode.jsonc` 恢复原状。
 6. **`ask`**：`{ action:"disable", id:"<X>", effect:"ask" }` → `debug agents` 里是 `"effect":"ask"`，且模型可见列表**仍包含** `<X>`（与 `deny` 的行为差异）。
 7. **`dryRun: true`** 不产生任何文件改动（前后哈希一致）。
-8. **归属（§11 变更，尚未实现）**：`enable` 的判据改为按序定位、命中即删 —— (a) 标记注释命中 → 删；(b) 无标记但 sidecar 有记录且配置里恰好一条完全相同 → 删并告警；(c) 两者都没有 → 拒绝并给出原文。断言要点：
+8. **归属（§11.1 已实现）**：`enable` 的判据改为按序定位、命中即删 —— (a) 标记注释命中 → 删；(b) 无标记但 sidecar 有记录且配置里恰好一条完全相同 → 删并告警；(c) 两者都没有 → 拒绝并给出原文。断言要点：
    - 只删掉标记注释（保留 sidecar）→ 走 (a) 直接删成功；
    - 只删掉 sidecar（保留标记）→ **仍然删成功**（这是新行为；老行为会拒绝）；
    - 标记与 sidecar 都删掉 → 拒绝，且输出该 id 的规则原文；
@@ -653,9 +653,9 @@ opencode plugin list --builtin  # 已加载插件与 source（local / package / 
 
 ---
 
-## 11. 下一次变更（v5 · **已定，尚未实现**）
+## 11. 下一次变更（v5 · **已实现**）
 
-> 来源：2026-10-19 与用户逐条确认的结论。正文相关处（§3.4 / §4.2 / §4.3 / §5 / §7(8)）已按本节预改。**实现后本节要回写为已实现，并补验收证据。**
+> 来源：2026-10-19 与用户逐条确认的结论。正文相关处（§3.4 / §4.2 / §4.3 / §5 / §7(8)）已按本节落地。**验收证据见 §11.6**；发布通道（CI 发布 + rc 运行时加载）仍待跑。
 
 ### 11.1 `enable` 判据放宽（行为变更，最重要）
 
@@ -699,7 +699,25 @@ opencode plugin list --builtin  # 已加载插件与 source（local / package / 
 
 ### 11.5 落地的 Definition of Done
 
-- 每条代码改动都在 `tools/verify.mjs` 里补断言（当前 136 项），全绿。
+- 每条代码改动都在 `tools/verify.mjs` 里补断言（已从 136 项增至 **167 项**），全绿。
 - 改完 `src/skill_management.js` 后重跑 `node tools/install.mjs`（`<config>/plugins/` 下那份是安装产物）。
 - 同步更新 `docs/preflight.md`（若涉及宿主行为）与本节。
 - 端到端必须在**新进程**里验：`opencode run --standalone --auto --format json '<消息>'`（消息是位置参数，没有 `--prompt`）。
+
+### 11.6 验收证据（2026-10-19 · 本机 Windows）
+
+`node tools/verify.mjs` → **全部通过：167 项**（A–G；G 段专测本节变更）。关键断言：
+
+| 变更 | 断言 / 证据 |
+|---|---|
+| §11.1 (a) | 标记命中 → 删除成功；输出含「被删规则的来源：本工具写入（同行标记注释）」与「删除后的生效效果」 |
+| §11.1 (b) | 无标记 + sidecar 唯一完全匹配 → 删除成功并 `⚠️` 告警 |
+| §11.1 (c) | 标记与 sidecar 都没有 → 拒绝，给出该 id 规则原文，文件不变 |
+| §11.1 sidecar 丢失 | 只清空 sidecar、保留标记 → **删除成功**（旧行为会拒绝；这是本次的主要动机） |
+| §11.1 歧义 | 同一 id 两条精确规则 → 拒绝并列出全部候选 |
+| §11.1 挡路的不是这一行 | `resource:"*"` 通配 deny / agent 级 `permissions` → 拒绝，输出调用者 agent 与命中规则原文 |
+| §11.1 删除后仍 deny | 通配 deny 仍在 → 仍报 ✅ 删除，同时写明「仍为 deny」及挡路规则 |
+| §11.2 | 多次写入后备份目录只有 **1** 份；写盘后无 `<file>.tmp` 残留 |
+| §11.3 | `description` 含 native tool / by name / Code Mode `search()`；`options.codemode` 仍为 `false` |
+
+CI：`.github/workflows/verify.yml`（`ubuntu-latest` + `windows-latest`，node 22）。本机未跑 CI，**待首次 push 后确认两平台结果**。
