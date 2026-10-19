@@ -16,7 +16,7 @@
 - [x] 实现写动作：`disable` + `enable`（标记注释 · 备份 · dryRun · 回读校验 · 回滚 · sidecar 审计）
 - [x] 按 §7 跑脚本化验收（本机 Windows 全项；Linux 未跑，见 §11）
 - [x] §11 变更落地：`enable` 判据放宽 · 备份 1 份 + 原子写 · description 硬化，并补断言（167 项全绿）
-- [x] CI（Windows + Linux 双跑）· 首发 `0.1.0-rc.0`（本机手工建包）· **运行时加载已证实**（只带包根即可）
+- [x] CI（Windows + Linux 双跑）· 首发 `0.1.0-rc.0`（本机手工建包）· **运行时加载已证实**（npm 与 git spec 两种通道都实测）
 - [x] trusted publisher 配置（Valid）· rc.1 与正式 `0.1.0` 由 CI 发布（带 provenance）
 
 ---
@@ -563,7 +563,7 @@ let Re = [...xx(e.tools, r), ...Px(e.permission, r), ...NH(e.permissions, fZ, ["
    - 成功删除后输出**删除后的生效效果**，若仍为 `deny` 必须写明原因。
 9. **一致性**：手动删掉配置里那条规则后，`list` 以实际规则集为准正确显示已恢复可用，并给出一行 sidecar 不一致提示。
 10. **热加载**：写规则后**不重启**，另开一次 `opencode run --format json` 观察是否即时生效；结论写进输出（这是 §9 第 1 项）。
-11. **安装路径**：`opencode plugin add <git spec>`（未发 npm 前用 Git spec 即可，spec 语法已证实支持 `github:`/`gitlab:`/`git+https://`/`git+ssh://` 等）→ 断言包被收下、写进全局配置 `plugins`、且 V2 下 `setup` 生效。**未实测，标为 preflight。**
+11. **安装路径**：`opencode plugin add <git spec>`（未发 npm 前用 Git spec 即可，spec 语法已证实支持 `github:`/`gitlab:`/`git+https://`/`git+ssh://` 等）→ 断言包被收下、写进全局配置 `plugins`、且 V2 下 `setup` 生效。**已实测（2026-10-20）：CLI 收下 + 运行时加载成功。**
 12. **平台**：Windows 与 Linux 各跑一遍第 4–6 项。
 
 ---
@@ -656,7 +656,7 @@ opencode plugin list --builtin  # 已加载插件与 source（local / package / 
 
 ## 11. 下一次变更（v5 · **已实现**）
 
-> 来源：2026-10-19 与用户逐条确认的结论。正文相关处（§3.4 / §4.2 / §4.3 / §5 / §7(8)）已按本节落地。**验收证据见 §11.6**；发布通道（CI 发布 + rc 运行时加载）仍待跑。
+> 来源：2026-10-19 与用户逐条确认的结论。正文相关处（§3.4 / §4.2 / §4.3 / §5 / §7(8)）已按本节落地。**验收证据见 §11.6**；发布通道（CI 发布 + npm/git spec 运行时加载）已全部跑通。
 
 ### 11.1 `enable` 判据放宽（行为变更，最重要）
 
@@ -686,7 +686,7 @@ opencode plugin list --builtin  # 已加载插件与 source（local / package / 
 
 **分发走双通道：**
 
-- **首选 git spec（零摩擦）**：README 安装段以 `opencode plugin add github:sogeisetsu/opencode-skill-management` 为首选。该语法已在 §7(11) 证实会被 `plugin add` 收下；**运行时加载**仍未实测。
+- **首选 git spec（零摩擦）**：README 安装段以 `opencode plugin add github:sogeisetsu/opencode-skill-management` 为首选。该语法已在 §7(11) 证实会被 `plugin add` 收下；**运行时加载也已实测（2026-10-20）**：安装后 `plugin list` 的 source 显示 `github:sogeisetsu/opencode-skill-management`（版本为 commit hash），新进程 `run --standalone` 可正常调用 `skill_management`。
 - **第二通道 npm 公开发布，由 CI 用 Trusted Publishing（OIDC）发布** —— 发布 = push 一个 tag，不再有人工登录 / OTP 打断。已核实的官方要求（npm docs 2026-10-16）：npm CLI **≥ 11.5.1**（本机 10.9.8 → CI 里先升 npm；带 dist-tag 另需 ≥ 11.21.0）、Node **≥ 22.14.0**、只支持 GitHub 托管 runner；npmjs.com 侧包设置里配 Trusted Publisher（owner/repo/`publish.yml`，**配完 2 天内需完成首次发布**否则失效）；workflow 需 `permissions: {id-token: write, contents: read}`；`package.json` 的 `repository.url` **必须与仓库完全一致**；provenance 自动生成（OIDC + 公开仓库 + 公开包三个条件本仓库都满足）。
 - **已排除 GitHub Packages**：官方文档明写只支持 scoped 包名、**安装即使公开包也要 token**、只认 classic PAT、首次发布默认私有 —— 对"别人一条命令装上"是反向优化。
 
@@ -729,6 +729,7 @@ opencode plugin list --builtin  # 已加载插件与 source（local / package / 
 |---|---|
 | `npm publish --tag next`（本机，rc.0） | ✅ `opencode-skill-management@0.1.0-rc.0`；随后 `npm view` 可见 |
 | `opencode plugin add opencode-skill-management@0.1.0-rc.0` | ✅ 写入全局配置 `plugins` 数组 |
+| `opencode plugin add github:sogeisetsu/opencode-skill-management` | ✅ 写入配置；`plugin list` 显示 source `github:…`、版本为 commit hash；新进程调用成功 |
 | `opencode plugin list` | ✅ `skill_management 0.1.0-rc.0 opencode-skill-management@0.1.0-rc.0` |
 | 新进程 `run --standalone` 调用 `skill_management` | ✅ `status=completed`（只带包根即可，无需 `./server`） |
 | `opencode plugin check` | ✅ 列为 current |

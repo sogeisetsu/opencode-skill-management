@@ -162,3 +162,14 @@ opencode plugin list
 `plugin check` 正常列出；`plugin remove` 正常移除（会在文件末尾多留一个换行，还原配置时要去掉）。
 
 > 宿主 2.0.32 的 CLI 小坑：`opencode plugin update <target>` 即使配置里的 spec 完全一致也会报 `Plugin is not configured: <target>`（target 带版本时直接抛栈）；不带 target 的 `opencode plugin update` 正常（`No plugin updates available`）。这是宿主行为，与本插件无关。
+
+**git spec 同样已实测（2026-10-20）**：
+
+```pwsh
+opencode plugin add github:sogeisetsu/opencode-skill-management
+# Plugin "github:sogeisetsu/opencode-skill-management" installed and added to ...\opencode.jsonc
+opencode plugin list
+# skill_management   9cb02f7   github:sogeisetsu/opencode-skill-management
+```
+
+新进程 `run --standalone` 调用 `skill_management` 成功；`plugin remove github:sogeisetsu/opencode-skill-management` 正常，配置逐字节还原。

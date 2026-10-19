@@ -127,12 +127,13 @@ opencode plugin list --builtin
 - 原子写：同目录 `.tmp` + `renameSync`，验收断言写入后无 `.tmp` 残留。
 - 备份滚动只保留 **1 份**（配置文件含 MCP 凭据，副本越少越好）；多次写入后断言仍为 1 份。
 
-### C. npm 包分发与运行时加载（v5 · 2026-10-19）
+### C. npm / git spec 分发与运行时加载（v5 · 2026-10-19/20）
 
 | 步骤 | 结果 |
 |---|---|
 | `npm publish --tag next`（本机手工，rc.0） | ✅ `opencode-skill-management@0.1.0-rc.0` |
 | `opencode plugin add opencode-skill-management@0.1.0-rc.0` | ✅ 写入全局配置 `plugins` |
+| `opencode plugin add github:sogeisetsu/opencode-skill-management` | ✅ 写入配置；source 显示 `github:…`，版本为 commit hash |
 | `opencode plugin list` | ✅ `skill_management 0.1.0-rc.0 opencode-skill-management@0.1.0-rc.0` |
 | 新进程 `run --standalone` | ✅ 工具可调用、`status=completed` |
 | `plugin check` | ✅ current |

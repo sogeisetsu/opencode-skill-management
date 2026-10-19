@@ -51,7 +51,7 @@ opencode plugin list --builtin
 # skill_management    local    C:\Users\suyue\.config\opencode\plugins\skill_management.js
 ```
 
-> git spec 与 npm 两种方式在 CLI 侧已被 `plugin add` 收下；**运行时加载**的实测结论见规范 §11 / `docs/preflight.md`。
+> git spec 与 npm 两种方式都已实测：CLI 收下、写入配置、**新进程里可正常加载并调用**（细节见规范 §11 / `docs/preflight.md`）。
 
 ## 验收
 
