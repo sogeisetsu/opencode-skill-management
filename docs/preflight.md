@@ -160,3 +160,5 @@ opencode plugin list
 新进程 `opencode run --standalone` 里直接调用 `skill_management({action:"list"})` → `status=completed`。
 `package.json` 只有 `exports["."]`、**没有** `./server`，因此 §1.1 的退路（补 `./server`）**不需要**。
 `plugin check` 正常列出；`plugin remove` 正常移除（会在文件末尾多留一个换行，还原配置时要去掉）。
+
+> 宿主 2.0.32 的 CLI 小坑：`opencode plugin update <target>` 即使配置里的 spec 完全一致也会报 `Plugin is not configured: <target>`（target 带版本时直接抛栈）；不带 target 的 `opencode plugin update` 正常（`No plugin updates available`）。这是宿主行为，与本插件无关。

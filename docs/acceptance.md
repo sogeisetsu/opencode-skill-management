@@ -136,7 +136,10 @@ opencode plugin list --builtin
 | `opencode plugin list` | ✅ `skill_management 0.1.0-rc.0 opencode-skill-management@0.1.0-rc.0` |
 | 新进程 `run --standalone` | ✅ 工具可调用、`status=completed` |
 | `plugin check` | ✅ current |
+| `plugin update`（无 target） | ✅ `No plugin updates available` |
+| `plugin update <target>` | ⚠️ 宿主 2.0.32 的 CLI bug：即使配置里的 spec 完全一致也报 `Plugin is not configured: <target>`（带版本时直接抛栈）；与本插件无关 |
 | `plugin remove` | ✅ 移除成功；配置随后逐字节还原（`7D16F8A3…` / 15014 bytes） |
+| 正式 `0.1.0` 包运行时 | ✅ 安装后在**新进程**里调用 `skill_management` → `status=completed` |
 | Trusted Publisher | ✅ `sogeisetsu/opencode-skill-management` · `publish.yml` · `npm publish` + `npm dist-tag`；状态 Valid |
 | `v0.1.0-rc.1` CI 发布 | ✅ `publish.yml` 成功；`next` → `0.1.0-rc.1`；SLSA provenance 已生成 |
 | `v0.1.0` CI 发布 | ✅ `latest` → `0.1.0`；SLSA provenance 已生成 |
