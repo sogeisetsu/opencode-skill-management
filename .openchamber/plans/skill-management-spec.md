@@ -1,20 +1,22 @@
 # `skill_management` 工具规范（v4 · 基于 2.0.32 源码实证）
 
-> 状态：待实现（plan 阶段产出）
+> 状态：**已实现并通过验收**（Windows · 2.0.32；`tools/verify.mjs` 136 项断言 + 真实宿主端到端）。**§11 的变更尚未实现**，正文与之冲突处以 §11 为准（§3.4 / §4.2 / §5 / §7 已按 §11 预改）。
 > 基准宿主：本机 **OpenCode v2.0.32**（`opencode --version` 实跑）
 > **真源规则（硬性）**：一切接口结论以 **(a) 宿主二进制内嵌源码** 与 **(b) 实跑 `opencode debug *`** 为唯一真源。
 > `<config>/node_modules/@opencode-ai/*` 下的类型定义**只作参考，不得作为结论依据** —— 本机装的是 `@opencode-ai/plugin@1.18.18` / `@opencode-ai/sdk@1.18.18`，与宿主 2.0.32 已漂移（§1.3 有三处实证）。
 > 复核方式：结论旁内联标注出处与 **已证实 / 待实测**；宿主升级后按 §9 重新核对，不沿用旧结论。
-> 文末 §10 是相对上一版（v3）的改动清单。
+> 文末 §10 是相对上一版（v3）的改动清单；**§11 是已定但未实现的下一批变更**。
 
 ---
 
 ## Steps
 
-- [ ] preflight 两项：写 `permissions` 是否热生效；`opencode plugin add <git spec>` 是否收下本包（§9）
-- [ ] 实现只读动作：`list` + `inspect`
-- [ ] 实现写动作：`disable` + `enable`（标记注释 · 备份 · dryRun · 回读校验 · 回滚 · sidecar 审计）
-- [ ] 按 §7 跑脚本化验收（本机 Windows + Linux 各一遍）
+- [x] preflight：写 `permissions` 热生效（§9）；`plugin add` 门禁收下"只带包根"的包
+- [x] 实现只读动作：`list` + `inspect`
+- [x] 实现写动作：`disable` + `enable`（标记注释 · 备份 · dryRun · 回读校验 · 回滚 · sidecar 审计）
+- [x] 按 §7 跑脚本化验收（本机 Windows 全项；Linux 未跑，见 §11）
+- [ ] §11 变更落地：`enable` 判据放宽 · 备份 1 份 + 原子写 · description 硬化，并补断言
+- [ ] CI（Windows + Linux 双跑）· 发布 npm（`plugin add` 的**运行时**加载待验）
 
 ---
 
@@ -318,13 +320,29 @@ eF = o({ id: kp, name: Jb, description: t.pipe(y), autoinvoke: k.pipe(y), path: 
 
 ### 3.4 `enable`
 
-1. **前置条件：sidecar 里必须有该 id 的记录**，否则一律拒绝执行（fail-closed）。在此前提下按序定位：
+> **本节为 §11 变更，尚未实现。** 实现前的行为是「sidecar 里没有该 id 的记录 → 一律拒绝（fail-closed）」。
 
-   a. sidecar 有记录 **且** 命中本工具标记注释 → 精确删除那一条（标记的作用是在该 id 可能存在多条同类规则时，指出"本工具写的是哪一条"）。
-   b. sidecar 有记录，但标记被外部写者剥掉 → 若配置里存在**恰好一条**完全相同的三元组，删除并**告警**；找不到唯一匹配则拒绝（不猜）。
-   c. sidecar 无记录 → **拒绝执行**，即使规则带本工具的标记注释也一样拒绝（标记可能是巧合或被人抄过去的）。输出该 id 相关规则的原文，让用户自己确认处理。
-2. 删完若 `permissions` 数组为空，把空块一并清理干净。
-3. 同样的备份 + `dryRun` + `agent.reload()` 回读校验 + 失败回滚。
+**判据不是「这条规则是谁写的」，而是「挡路的这条规则能否被唯一确定」。** 用户调 `enable`，意图就是让该 skill 可用；因此只要挡路的是一条**精确命中该 id 的全局规则**（`action` 匹配 `skill`、`resource` 恰好等于该 id），就删掉它。归属只决定**报告的措辞**，不决定**做不做**。
+
+1. 定位（按序，命中即用）：
+
+   a. **标记注释命中** → 精确删除那一条（§4.3 的 `MARKER` 写在本工具那一行的行尾）。标记与配置文件同生共死，是**最硬**的证据：即使 sidecar 丢失也照样认。
+   b. 标记未命中，但 **sidecar 有该 id 的记录**，且配置里存在**恰好一条**完全相同的三元组 → 删除并**告警**；找不到唯一匹配则拒绝（不猜）。
+   c. 两者都没有 → **拒绝执行**，并输出该 id 相关规则的原文，让用户自己确认处理。
+
+   > 顺序的关键：标记（文件内自证）**优先于** sidecar（外部账本）。早期版本要求 sidecar 先有记录才去看标记，会让「sidecar 丢失」变成永久误拒 —— 明明铁证就在文件里。
+
+2. 仍然拒绝的两类（**与归属无关**）：
+
+   - **歧义**：同一个 id 出现多条同类规则（宿主求值是**最后一条命中算数**，删错那条会"看起来成功但行为没变"）；多行都带标记；规则被重排成多行或键序被打乱，导致"删一行"这个动作本身不成立。
+   - **挡路的不是这一行**：全局通配规则（`resource: "*"`）、某个 agent 自己的 `agents.<id>.permissions`、`policies`。这三样一律**只报告不代改**（§6），输出里要给出命中的规则原文与出处（哪个 agent / 哪个文件）。
+
+     > 这类情况本工具**做不到**「帮用户打开」：唯一办法是在更宽的规则**之前**插一条只给该 id 的 `allow` 去豁免，而 `allow` 是明确不做的事（§3.3 第 4 点）。
+
+3. **删完必须报告结果**（事后报告，不是放行闸门）：输出调用者 agent 的**生效效果**（`available` / `ask` / `deny`），并说明被删的这条是本工具写的还是外来的。若删除后仍被更宽的规则压成 `deny`，必须写出来，不能只报"已删除"。
+4. 删完若 `permissions` 数组为空，把空块一并清理干净。
+5. 同样的备份 + `dryRun` + `agent.reload()` 回读校验 + 失败回滚。
+6. **不提供 `force` 之类的开关**：那等于把安全属性变成模型能直接翻的按钮，与本工具的定位冲突。
 
 ### 3.5 `id` 与 `name` 的来源（实证）
 
@@ -433,7 +451,9 @@ let Re = [...xx(e.tools, r), ...Px(e.permission, r), ...NH(e.permissions, fZ, ["
   let T = ym(Ne, bm(Ne, ["shell"], xe.shell ?? void 0, { formattingOptions: { tabSize: 2, insertSpaces: !0 } }));
   ```
   → 写盘保留 `bm`/`ym` 这类"构造编辑 + 应用编辑"的思路，能天然保住注释。
-- 落盘用 `tmp` + `rename` 是**宿主的做法**（`let s = e + ".tmp"; await k(s, i…); …rename`）。本工具可采用同样方式，但**必须先备份原文件**，并在失败时回滚。
+- 落盘用 `tmp` + `rename` 是**宿主的做法**（`let s = e + ".tmp"; await k(s, i…); …rename`）。本工具**改为同样方式（§11 变更，尚未实现）**：同目录写 `<file>.tmp` → `fs.renameSync` 覆盖。`rename` 在同文件系统内是原子的，因此不存在"写到一半被截断"的中间状态 —— 这也是把备份降为"1 份兜底"的前提。
+- **备份策略（§11 变更，尚未实现）**：写前把目标文件复制到 `<config>/skill_management.backups/`，**滚动只保留 1 份**。备份是目标文件的**逐字节完整副本**，不写任何元数据（出处只记 sidecar）。
+  > 收紧理由：该文件含 MCP 凭据（本机实测备份目录里 6 份副本各含 1 处 `Bearer`），副本越少越好；而"跨会话后悔药"由原子写 + 内存回滚基本覆盖。
 - 只操作 `permissions` 数组里属于本工具的条目。
 
 > 补充实证：宿主**并非处处**用文本编辑 —— `cli.json` 的旧 `tui.json`+`kv.json` 迁移用的是 `JSON.stringify` 回写，另有多处 `JSON.stringify({$schema:…}, null, 2)` 仅作为"文件不存在时的初始内容"。但**全局 opencode 配置**的四条写路径（`plugin add` / `plugin remove` / `mcp add` / `Config.update`）**全部**是 `bm`/`ym` 文本编辑，本工具只关心这条。
@@ -467,7 +487,7 @@ let Re = [...xx(e.tools, r), ...Px(e.permission, r), ...NH(e.permissions, fZ, ["
 }
 ```
 
-用途只剩两件：`list` 的一致性提示（§3.1），以及 `enable` 的次选定位（§3.4 步骤 1b）。**状态判定始终以实际读到的规则集为准**（§3.6）。
+用途只剩两件：`list` 的一致性提示（§3.1），以及 `enable` 的**次选**定位（§3.4 步骤 1b）。**状态判定始终以实际读到的规则集为准**（§3.6）。**sidecar 不再是 `enable` 的前置条件**（§11 变更）：它丢失只会让措辞从"本工具写的"变成"外来的"，不再是拒绝的理由。
 
 > 备选：V2 插件有 `ctx.storage`（**已证实**：`{ get, set, remove, scan }`）。不用它是因为 sidecar 可审计、可手工修复、与插件生命周期解耦。
 
@@ -491,14 +511,15 @@ let Re = [...xx(e.tools, r), ...Px(e.permission, r), ...NH(e.permissions, fZ, ["
 
 ## 5. 工具 description（给模型看的那段）
 
-> List, inspect, enable or disable installed OpenCode skills. `list` shows every registered skill with its effective state (available / disabled / ask). `disable` hides a skill from the model and rejects loading it by adding one permission rule to the **global** config — it never touches skill files. `enable` removes the rule this tool added. Use when the user asks which skills are installed, why one is not available, or wants one turned off or on.
+> List, inspect, enable or disable installed OpenCode skills. `list` shows every registered skill with its effective state (available / disabled / ask). `disable` hides a skill from the model and rejects loading it by adding one permission rule to the **global** config — it never touches skill files. `enable` removes the blocking global rule for that skill, whoever wrote it. This is a **native tool**: call it directly by name; do not look for it with Code Mode `search()` / `execute`.
 
 语义必须写清楚（避免模型误用）：
 
 - `deny` = 从模型可见列表隐藏 **且** 拒绝 `skill` 工具加载（粒度 = skill id）。
 - `ask` = 仍在列表里、加载时确认；`disable` 默认写 `deny`，可通过 `effect` 显式选 `ask`。
 - agent 级 `agents.<id>.permissions` 与 `policies` 可覆盖/移除 skill；本工具**只报告**，不代改。
-- `enable` 只删**本工具写入的**那一条；用户手写的规则一律不动。
+- `enable` 删掉**挡路的那一条精确规则**，不要求这条是本工具写的（§3.4，§11 变更）；但若挡路的是通配规则 / agent 级规则 / `policies`，或存在多条无法唯一定位 → 拒绝并给出原文。
+- **本工具是原生工具（`options:{codemode:false}`）**：模型应**直接按名字调用**。它**不在 Code Mode 目录里**，在 `execute` 里用 `search()` / `tools.*` 找它会得出"工具不存在"的错误结论（已实际观察到一次）。
 - 生效时机：写后本工具会主动调 `ctx.agent.reload()` 并在进程内复核；但**其它**正在运行会话的可见列表何时刷新仍需实测（§9 第 1 项），必要时会明确告知需新会话。
 
 ---
@@ -532,7 +553,13 @@ let Re = [...xx(e.tools, r), ...Px(e.permission, r), ...NH(e.permissions, fZ, ["
 5. **`enable` 还原**：`enable` 后同一组断言反向成立；前后 diff 干净；`opencode.jsonc` 恢复原状。
 6. **`ask`**：`{ action:"disable", id:"<X>", effect:"ask" }` → `debug agents` 里是 `"effect":"ask"`，且模型可见列表**仍包含** `<X>`（与 `deny` 的行为差异）。
 7. **`dryRun: true`** 不产生任何文件改动（前后哈希一致）。
-8. **归属**：手工把标记注释删掉后再 `enable` → 走 §3.4 步骤 1b，删除并告警；再把 sidecar 也删掉后 `enable` → **拒绝执行**并给出规则原文。
+8. **归属（§11 变更，尚未实现）**：`enable` 的判据改为按序定位、命中即删 —— (a) 标记注释命中 → 删；(b) 无标记但 sidecar 有记录且配置里恰好一条完全相同 → 删并告警；(c) 两者都没有 → 拒绝并给出原文。断言要点：
+   - 只删掉标记注释（保留 sidecar）→ 走 (a) 直接删成功；
+   - 只删掉 sidecar（保留标记）→ **仍然删成功**（这是新行为；老行为会拒绝）；
+   - 标记与 sidecar 都删掉 → 拒绝，且输出该 id 的规则原文；
+   - 配置里放两条同 id 规则 → 拒绝并**列出全部**候选；
+   - 挡路的是 `resource:"*"` 或某个 agent 的 `permissions` → 拒绝，输出里指出出处；
+   - 成功删除后输出**删除后的生效效果**，若仍为 `deny` 必须写明原因。
 9. **一致性**：手动删掉配置里那条规则后，`list` 以实际规则集为准正确显示已恢复可用，并给出一行 sidecar 不一致提示。
 10. **热加载**：写规则后**不重启**，另开一次 `opencode run --format json` 观察是否即时生效；结论写进输出（这是 §9 第 1 项）。
 11. **安装路径**：`opencode plugin add <git spec>`（未发 npm 前用 Git spec 即可，spec 语法已证实支持 `github:`/`gitlab:`/`git+https://`/`git+ssh://` 等）→ 断言包被收下、写进全局配置 `plugins`、且 V2 下 `setup` 生效。**未实测，标为 preflight。**
@@ -623,3 +650,46 @@ opencode plugin list --builtin  # 已加载插件与 source（local / package / 
 25. **§3.3 回读校验更正**：`ctx.agent.reload()` 会在配置文件被重新读入**之前**返回 —— 必须**轮询**（实现取 200ms × 最多 6s，可用 `SKILL_MGMT_VERIFY_TIMEOUT_MS` 覆盖）。判据改为**调用者 agent 是否达到期望**；若有 agent 用自己的后续规则覆盖全局规则，**报告**而不判失败（实测本机 12/13 个 agent 把全局规则排在最后，`fast-responder` 排在 index 4）。
 26. **§7(4)/(6) 通过**：`disable` 后配置与备份的差异**恰好**是 3 行权限块 + 上一行补的 1 个逗号；`enable` 逐字节还原；手工删掉配置里那条规则后，`list` 把该 skill 显示为 `available` 并输出 `⚠️ sidecar 与配置不一致`。修正：一致性判据必须是「**配置里已无对应规则**」，而不是早期的「id 不在注册表里」（后者会漏报 —— 实现期踩到并修）。
 27. **§3.6 / §7 拒绝形态更正**：拒载返回 `{"error":{"type":"permission.rejected","message":"Permission denied: skill"}}`；`Unable to load skill <id>` 只在 id 不存在时出现。
+
+---
+
+## 11. 下一次变更（v5 · **已定，尚未实现**）
+
+> 来源：2026-10-19 与用户逐条确认的结论。正文相关处（§3.4 / §4.2 / §4.3 / §5 / §7(8)）已按本节预改。**实现后本节要回写为已实现，并补验收证据。**
+
+### 11.1 `enable` 判据放宽（行为变更，最重要）
+
+**从「只删本工具写的规则」改为「删掉挡路的那一条精确规则」。**
+
+- 判据不是归属，是**能否唯一定位**：`action` 匹配 `skill`、`resource` 恰好等于该 id 的那一条全局规则。
+- 定位顺序改为**标记注释优先于 sidecar**：(a) 标记命中 → 直接删；(b) 无标记但 sidecar 有记录且恰好一条完全相同 → 删并告警；(c) 两者都没有 → 拒绝并给出原文。
+  > 旧顺序（sidecar 为前置）会让「sidecar 丢失」变成永久误拒，而铁证（标记注释）就在文件里。这是本次改动的主要动机。
+- 仍然拒绝且只报告的两类：**歧义**；**挡路的不是这一行**（通配规则 / agent 级 `permissions` / `policies`）。
+- 成功删除后必须报告**删除后的生效效果**（可能仍是 `deny`）与被删规则的来源（本工具 / 外来）。
+- 不加 `force` 开关。
+
+### 11.2 备份与落盘
+
+- `MAX_BACKUPS`：10 → **1**（保留"写坏能回滚"的能力，同时把含 MCP 凭据的副本从 10 份降到 1 份）。
+- `writeTextFile` 改为**原子写**：同目录 `<file>.tmp` → `renameSync` 覆盖。不做这一步的话备份仍是唯一兜底。
+- 备份保持**逐字节完整副本**，不写元数据；规则出处只记 sidecar。
+
+### 11.3 模型可发现性（低成本）
+
+- `options.codemode` **维持 `false`**（改 `true` 会让工具挤进 Code Mode 目录，本机有"目录截断导致工具掉出去"的先例）。
+- 硬化 description：明确写"这是原生工具，直接按名字调用，不要在 Code Mode 里用 `search()` / `execute` 找它"（§5 已写入）。
+
+### 11.4 顺序与发布（非代码）
+
+- 顺序调整为 **发布（P4）→ CI（P3）→ Linux 逻辑层核验（P2）**。P3 的 `ubuntu-latest` job 跑的是同一套断言，P2 预计被顺带覆盖，不再单独排期。
+- P4 前置：补 `LICENSE`（MIT）；`package.json` 去掉 `private: true`、定 `0.1.0`、补 `repository` / `bugs` / `homepage` / `keywords`；README 安装段改为**优先 `opencode plugin add`**。
+- 发布前必须先发 `0.1.0-rc.0` 验证**运行时**能加载"只带包根"的包（`plugin add` 的 CLI 门禁已证会收下，运行时加载**未证**）。退路：补 `exports["./server"]` 指向同一文件。
+- CI：`.github/workflows/verify.yml`，matrix `ubuntu-latest` + `windows-latest`，node 22，跑 `node tools/verify.mjs`（harness 全程在临时 `<config>` 下，不需要任何 secret）。
+- 明确不做：Linux **真实宿主**验证（本机无 Linux 的 OpenCode 安装）。
+
+### 11.5 落地的 Definition of Done
+
+- 每条代码改动都在 `tools/verify.mjs` 里补断言（当前 136 项），全绿。
+- 改完 `src/skill_management.js` 后重跑 `node tools/install.mjs`（`<config>/plugins/` 下那份是安装产物）。
+- 同步更新 `docs/preflight.md`（若涉及宿主行为）与本节。
+- 端到端必须在**新进程**里验：`opencode run --standalone --auto --format json '<消息>'`（消息是位置参数，没有 `--prompt`）。
