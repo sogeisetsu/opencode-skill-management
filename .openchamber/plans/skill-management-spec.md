@@ -679,13 +679,23 @@ opencode plugin list --builtin  # 已加载插件与 source（local / package / 
 - `options.codemode` **维持 `false`**（改 `true` 会让工具挤进 Code Mode 目录，本机有"目录截断导致工具掉出去"的先例）。
 - 硬化 description：明确写"这是原生工具，直接按名字调用，不要在 Code Mode 里用 `search()` / `execute` 找它"（§5 已写入）。
 
-### 11.4 顺序与发布（非代码）
+### 11.4 顺序与发布通道（非代码）
 
-- 顺序调整为 **发布（P4）→ CI（P3）→ Linux 逻辑层核验（P2）**。P3 的 `ubuntu-latest` job 跑的是同一套断言，P2 预计被顺带覆盖，不再单独排期。
-- P4 前置：补 `LICENSE`（MIT）；`package.json` 去掉 `private: true`、定 `0.1.0`、补 `repository` / `bugs` / `homepage` / `keywords`；README 安装段改为**优先 `opencode plugin add`**。
-- 发布前必须先发 `0.1.0-rc.0` 验证**运行时**能加载"只带包根"的包（`plugin add` 的 CLI 门禁已证会收下，运行时加载**未证**）。退路：补 `exports["./server"]` 指向同一文件。
-- CI：`.github/workflows/verify.yml`，matrix `ubuntu-latest` + `windows-latest`，node 22，跑 `node tools/verify.mjs`（harness 全程在临时 `<config>` 下，不需要任何 secret）。
-- 明确不做：Linux **真实宿主**验证（本机无 Linux 的 OpenCode 安装）。
+**顺序：CI 先行 → §11 代码变更 → 发布前置 → 配 trusted publisher → 发 rc 验运行时加载 → 正式发布。** Linux 逻辑层核验（P2）推到**下一轮**，届时多半只需确认 CI 的 `ubuntu-latest` job 结果。
+
+**分发走双通道：**
+
+- **首选 git spec（零摩擦）**：README 安装段以 `opencode plugin add github:sogeisetsu/opencode-skill-management` 为首选。该语法已在 §7(11) 证实会被 `plugin add` 收下；**运行时加载**仍未实测。
+- **第二通道 npm 公开发布，由 CI 用 Trusted Publishing（OIDC）发布** —— 发布 = push 一个 tag，不再有人工登录 / OTP 打断。已核实的官方要求（npm docs 2026-10-16）：npm CLI **≥ 11.5.1**（本机 10.9.8 → CI 里先升 npm；带 dist-tag 另需 ≥ 11.21.0）、Node **≥ 22.14.0**、只支持 GitHub 托管 runner；npmjs.com 侧包设置里配 Trusted Publisher（owner/repo/`publish.yml`，**配完 2 天内需完成首次发布**否则失效）；workflow 需 `permissions: {id-token: write, contents: read}`；`package.json` 的 `repository.url` **必须与仓库完全一致**；provenance 自动生成（OIDC + 公开仓库 + 公开包三个条件本仓库都满足）。
+- **已排除 GitHub Packages**：官方文档明写只支持 scoped 包名、**安装即使公开包也要 token**、只认 classic PAT、首次发布默认私有 —— 对"别人一条命令装上"是反向优化。
+
+**发布前置**：补 `LICENSE`（MIT 全文，年份 **2026**，署名 **sogeisetsu**）；`package.json` 去掉 `private: true`、定 `0.1.0`、补 `repository`（`https://github.com/sogeisetsu/opencode-skill-management`，必须与仓库完全一致）/ `bugs` / `homepage` / `keywords`；README 安装段改序。
+
+**首发必须先发 `0.1.0-rc.0`** 验证**运行时**能加载"只带包根"的包（`plugin add` 的 CLI 门禁已证会收下，运行时加载**未证**）。退路：补 `exports["./server"]` 指向同一文件。
+
+**CI**：`.github/workflows/verify.yml`，matrix `ubuntu-latest` + `windows-latest`，node 22，跑 `node tools/verify.mjs`（harness 全程在临时 `<config>` 下，不需要任何 secret）。
+
+**明确不做**：Linux **真实宿主**验证（本机无 Linux 的 OpenCode 安装）；`npm stage publish` 式的人工审批发布（复杂度收益比不划算，暂不引入）。
 
 ### 11.5 落地的 Definition of Done
 
