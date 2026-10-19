@@ -1,6 +1,6 @@
 # `skill_management` 工具规范（v4 · 基于 2.0.32 源码实证）
 
-> 状态：**已实现并通过验收**（Windows · 2.0.32；`tools/verify.mjs` 167 项断言 + 真实宿主端到端）。**§11 的三项变更已实现**（见 §11.6 的验收证据），只剩发布通道（CI 发布 + rc 运行时加载）待跑。正文与之冲突处以 §11 为准。
+> 状态：**已实现并通过验收**（Windows · 2.0.32；`tools/verify.mjs` 167 项断言 + 真实宿主端到端）。**§11 的三项变更已实现**，发布通道也已跑通（CI trusted publishing → `0.1.0`，带 provenance）；验收证据见 §11.6。正文与之冲突处以 §11 为准。
 > 基准宿主：本机 **OpenCode v2.0.32**（`opencode --version` 实跑）
 > **真源规则（硬性）**：一切接口结论以 **(a) 宿主二进制内嵌源码** 与 **(b) 实跑 `opencode debug *`** 为唯一真源。
 > `<config>/node_modules/@opencode-ai/*` 下的类型定义**只作参考，不得作为结论依据** —— 本机装的是 `@opencode-ai/plugin@1.18.18` / `@opencode-ai/sdk@1.18.18`，与宿主 2.0.32 已漂移（§1.3 有三处实证）。
@@ -17,7 +17,7 @@
 - [x] 按 §7 跑脚本化验收（本机 Windows 全项；Linux 未跑，见 §11）
 - [x] §11 变更落地：`enable` 判据放宽 · 备份 1 份 + 原子写 · description 硬化，并补断言（167 项全绿）
 - [x] CI（Windows + Linux 双跑）· 首发 `0.1.0-rc.0`（本机手工建包）· **运行时加载已证实**（只带包根即可）
-- [ ] trusted publisher 配置（人工）· 由 CI 发后续版本 · 正式发布 `0.1.0`
+- [x] trusted publisher 配置（Valid）· rc.1 与正式 `0.1.0` 由 CI 发布（带 provenance）
 
 ---
 
@@ -692,7 +692,7 @@ opencode plugin list --builtin  # 已加载插件与 source（local / package / 
 
 **发布前置**：补 `LICENSE`（MIT 全文，年份 **2026**，署名 **sogeisetsu**）；`package.json` 去掉 `private: true`、定 `0.1.0`、补 `repository`（`https://github.com/sogeisetsu/opencode-skill-management`，必须与仓库完全一致）/ `bugs` / `homepage` / `keywords`；README 安装段改序。
 
-**首发必须先发 `0.1.0-rc.0`** 验证**运行时**能加载"只带包根"的包。**实测（2026-10-19）**：npm 不允许给未发布的包配置 trusted publisher（循环依赖，npm/cli#8544），因此 rc.0 改为**本机手工发布**（本机已登录 + 安全密钥 2FA）；包创建后配 trusted publisher（`npm publish` + `npm dist-tag`），随后 **`0.1.0-rc.1` 由 CI 发布成功并通过配置校验，自动生成 SLSA provenance**。运行时加载**已证实**，不需要 `exports["./server"]` 回退。
+**首发必须先发 `0.1.0-rc.0`** 验证**运行时**能加载"只带包根"的包。**实测（2026-10-19）**：npm 不允许给未发布的包配置 trusted publisher（循环依赖，npm/cli#8544），因此 rc.0 改为**本机手工发布**（本机已登录 + 安全密钥 2FA）；包创建后配 trusted publisher（`npm publish` + `npm dist-tag`），随后 **`0.1.0-rc.1` 与正式 `0.1.0` 均由 CI 发布成功**，配置状态 **Valid**，并自动生成 SLSA provenance。运行时加载**已证实**，不需要 `exports["./server"]` 回退。
 
 > 实测到的 npm 细节：第一次 `npm publish --tag next` 会先出现一个 `0.0.0-stage` 的临时占位版本（stub），几秒后真实版本才可查；且首次发布后 **`latest` 也会被指向这个版本**（即使指定了 `--tag next`）。发正式版后 `latest` 会随之更新。
 
@@ -735,6 +735,7 @@ opencode plugin list --builtin  # 已加载插件与 source（local / package / 
 | `opencode plugin remove ...` | ✅ 从配置移除；全局配置随后**逐字节还原**（`7D16F8A3…`，15014 bytes） |
 | Trusted Publisher 配置 | ✅ `sogeisetsu/opencode-skill-management` / `publish.yml` / `npm publish` + `npm dist-tag`；状态 **Valid** |
 | `v0.1.0-rc.1` 由 CI 发布 | ✅ `publish.yml` 成功；`next` → `0.1.0-rc.1`；`dist.attestations.provenance` = SLSA provenance v1 |
+| `v0.1.0` 由 CI 发布 | ✅ `latest` → `0.1.0`；同样带 SLSA provenance；`npm view` 可见 |
 
 > 注意：`plugin remove` 会在文件末尾多留一个换行；还原时需手工去掉（本次已做）。
 

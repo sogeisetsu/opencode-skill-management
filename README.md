@@ -7,6 +7,7 @@ OpenCode V2 的 `skill_management` 工具：**列出 / 诊断 / 停用 / 恢复*
 
 > 状态：**已实现并已在本机 OpenCode 2.0.32 上完整验收通过**（含写真实全局配置的 §7(4)(5)(6)(7)，配置已逐字节还原）。
 > 规范 v5 的三项变更（`enable` 判据放宽 · 备份 1 份 + 原子写 · description 硬化）已落地，`tools/verify.mjs` 共 167 项断言全绿。
+> npm：**`opencode-skill-management@0.1.0`**（由 CI 通过 trusted publishing 发布，带 SLSA provenance）。
 
 ## 目录
 
