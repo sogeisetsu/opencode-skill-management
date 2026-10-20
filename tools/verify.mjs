@@ -365,14 +365,21 @@ function makeCtx(opts = {}) {
     }
   }
   const agentItems = () =>
-    agents.map((a) => ({
-      ...a,
-      permissions: [
-        { action: "*", resource: "*", effect: "allow" },
-        ...(opts.staleAgents ? [] : readRules()),
-        ...(opts.agentRules?.[a.id] ?? []),
-      ],
-    }))
+    agents.map((a) => {
+      // 真实宿主里 agent 的 permissions = [默认 allow, ...全局规则, ...agent 自有规则]，
+      // agent 自有规则可能排在全局规则之后（本机 title/summary 的 {*,*,deny} 就是这样）。
+      // 夹具必须保留 a.permissions，否则「别的 agent 全 deny」根本进不了注册表，回归用例会空跑。
+      const own = Array.isArray(a.permissions) ? a.permissions : []
+      return {
+        ...a,
+        permissions: [
+          { action: "*", resource: "*", effect: "allow" },
+          ...(opts.staleAgents ? [] : readRules()),
+          ...own,
+          ...(opts.agentRules?.[a.id] ?? []),
+        ],
+      }
+    })
 
   const stats = { disposed: 0 }
   // 复刻真实宿主形状：transform 的 draft.list() 返回数组；list() 返回 { location, data } 信封
@@ -421,7 +428,7 @@ async function callWith(opts, action, args = {}) {
   const ctx = makeCtx(opts)
   await mod.default.setup(ctx)
   const tool = ctx.__tools.find((t) => t.name === "skill_management")
-  const res = await tool.execute({ action, ...args }, { agent: "build", sessionID: "test" })
+  const res = await tool.execute({ action, ...args }, { agent: opts.callerAgentId ?? "build", sessionID: "test" })
   return { text: res.content, ctx }
 }
 
@@ -461,6 +468,37 @@ async function call(action, args = {}) {
   ok("list description 只取首行", list.includes("Stress-test a plan") && !list.includes("second line"))
   ok("list 带统计行", /发现 5 个、已禁用 0 个、ask 0 个/.test(list))
   ok("list 打印目标配置文件路径", list.includes(CFG))
+  ok("list 标明调用者 agent（state 列的作用域）", list.includes("调用者 agent：`build`"), list)
+
+  // 回归：list 的 state 列只看调用者 agent 的规则集（规范 §3.6），不得合并所有 agent
+  {
+    const { text: t, ctx: c } = await callWith({ withTitleDeny: true }, "list")
+    const items = (await c.agent.list()).data
+    const title = items.find((a) => a.id === "title")
+    const own = title && Array.isArray(title.permissions) ? title.permissions : []
+    ok(
+      "夹具：title 的 {*,*,deny} 真的进了注册表（旧夹具会覆盖掉它，回归用例等于空跑）",
+      Boolean(title) && own.length > 0 && own[own.length - 1].effect === "deny",
+      JSON.stringify(own),
+    )
+    ok("别的 agent 全 deny 不影响调用者：统计仍是 0 disabled", /发现 5 个、已禁用 0 个、ask 0 个/.test(t), t)
+    ok("别的 agent 全 deny 时 state 列仍全是 available", (t.match(/\| available \|/g) ?? []).length === 5, t)
+    ok("提示其它 agent 下的差异", t.includes("另有 5 个 skill 在其它 agent 下状态不同"), t)
+  }
+  {
+    // 本机真实 bug 的最小复现：只有别的 agent（plan）deny，调用者（build）不该看到 disabled
+    const t = (await callWith({ agentRules: { plan: [{ action: "skill", resource: "grill-me", effect: "deny" }] } }, "list")).text
+    ok("只有别的 agent deny 某个 id 时，调用者仍是 available", /已禁用 0 个/.test(t) && !/\| grill-me \|[^\n]*\| disabled \|/.test(t), t)
+  }
+  {
+    // 调用者自己的 deny 仍然算数
+    const t = (await callWith({ agentRules: { build: [{ action: "skill", resource: "grill-me", effect: "deny" }] } }, "list")).text
+    ok("调用者自己的 deny 仍然生效", /已禁用 1 个/.test(t) && /\| grill-me \|[^\n]*\| disabled \|/.test(t), t)
+  }
+  {
+    const t = (await callWith({ callerAgentId: "ghost" }, "list")).text
+    ok("拿不到调用者 agent 时显式告警（不静默顶替）", t.includes("未能确认调用者 agent"), t)
+  }
 
   // inspect
   const insp = (await call("inspect", { id: "grill-me" })).text

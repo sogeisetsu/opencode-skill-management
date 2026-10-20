@@ -863,11 +863,19 @@ async function actList(ctx) {
   let disabled = 0
   let ask = 0
   const all = skills.map((raw) => normalizeSkill(raw))
-  const allRules = [...new Set(agents.flatMap((a) => ensureArray(a.permissions)).map((r) => JSON.stringify(r)))].map((j) => JSON.parse(j))
+  // 规范 §3.6：有效状态按**单个 agent** 的规则集求值。绝不能把所有 agent 的规则合并去重——
+  // 那会把子 agent（explorer / title …）的 deny 泄漏给调用者（v5 的 bug：29 个里 28 个假 disabled）。
+  const callerAgent = pickAgent(agents, ctx.__agentId)
+  const callerRules = ensureArray(callerAgent?.permissions)
+  const callerId = callerAgent?.id ?? "(未知)"
+  let diverged = 0
   for (const s of all) {
-    const st = s.id ? stateOf(allRules, s.id) : { effect: "unknown" }
+    const st = s.id ? stateOf(callerRules, s.id) : { effect: "unknown" }
     if (st.effect === "deny") disabled++
     else if (st.effect === "ask") ask++
+    if (s.id && agents.length > 1) {
+      if (agents.some((a) => stateOf(ensureArray(a.permissions), s.id).effect !== st.effect)) diverged++
+    }
     rows.push([
       s.id ?? "(unknown)",
       s.name ?? "",
@@ -890,6 +898,15 @@ async function actList(ctx) {
   )
   lines.push("")
   lines.push(`发现 ${rows.length} 个、已禁用 ${disabled} 个、ask ${ask} 个。`)
+  lines.push(`调用者 agent：\`${callerId}\`（state 列按该 agent 的有效规则集求值，见规范 §3.6）`)
+  if (!ctx.__agentId || !agents.some((a) => a.id === ctx.__agentId)) {
+    lines.push(
+      `⚠️ 未能确认调用者 agent（context.agent = ${JSON.stringify(ctx.__agentId ?? null)}），state 列按 \`${callerId}\` 计算，可能不代表你的实际权限。`,
+    )
+  }
+  if (diverged > 0) {
+    lines.push(`ℹ️ 另有 ${diverged} 个 skill 在其它 agent 下状态不同（详见 \`inspect\` 的逐 agent 表）。`)
+  }
   if (derivedCount > 0) {
     lines.push(`注：其中 ${derivedCount} 个 id 由路径反推（注册表项未提供 \`id\`；推导规则见 \`inspect\`）。`)
   }

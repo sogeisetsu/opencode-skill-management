@@ -6,7 +6,7 @@
 ## 命令
 
 ```pwsh
-node tools/verify.mjs                # 167 项断言；跑在临时 <config> 下，不碰真实配置
+node tools/verify.mjs                # 175 项断言；跑在临时 <config> 下，不碰真实配置
 node tools/verify.mjs --section G    # 只跑一段（A–G，按标题前缀匹配，大小写不敏感）
 node tools/install.mjs               # 幂等安装到 <config>/plugins/skill_management.js
 ```
@@ -22,7 +22,7 @@ node tools/install.mjs               # 幂等安装到 <config>/plugins/skill_ma
 - **`ctx.skill.list()` / `ctx.agent.list()` 返回 `{location, data}` 信封，不是数组。** 拿注册表要用 `ctx.<域>.transform(draft => draft.list())`，并 `dispose()` 掉返回的注册（否则每次调用都留一个 hook）。
 - **唯一真源是宿主二进制 + `opencode debug *`，不是 npm 类型包。** 本机 `@opencode-ai/plugin` 是 1.18.18 而宿主是 2.0.32：其 v2 类型**没有 `ctx.tool`**，`SkillV2Info` 用的是 `location`（真实字段是 `path`），`ToolContext` 也没有真实的 `progress`。按那些类型写会直接错。
 - **重载是异步的**：`ctx.agent.reload()` 会在配置文件被重新读入**之前**返回。回读校验必须**轮询**（见 `verifyEffect`，200ms × 最多 6s，可用 `SKILL_MGMT_VERIFY_TIMEOUT_MS` 覆盖）。
-- **别用「所有 agent 都 deny」当判据**：`title` / `summary` 是 `{*,*,deny}`（内部 agent），而且 agent 自有规则**可能排在全局规则之后**（本机 `fast-responder` 就是这样）。判断"是否被更宽规则覆盖"只看**调用者 agent**（执行上下文里的 `context.agent`）。
+- **别用「所有 agent 都 deny」当判据**：`title` / `summary` 是 `{*,*,deny}`（内部 agent），而且 agent 自有规则**可能排在全局规则之后**（本机 `fast-responder` 就是这样）。判断"是否被更宽规则覆盖"只看**调用者 agent**（执行上下文里的 `context.agent`）。**`list` 的 state 列同样适用**：把所有 agent 的 `permissions` 合并去重再 `findLast`，会把子 agent（`explorer`/`title`…）的 deny 泄漏给调用者——本机曾因此把 29 个里的 28 个误报成 disabled（v5 修，回归用例在 `tools/verify.mjs` 的 `withTitleDeny`）。夹具也踩过：`agentItems()` 若先 `...a` 再赋 `permissions:`，agent 自带的规则会被覆盖掉，用例空跑。
 - 命名近似别混：顶层 `permissions`（数组，V2 用）vs `permission`（单数对象，已 deprecated）；断言入参是 **`resources`（复数）**，规则匹配是 **`resource`（单数）**。
 - 求值无命中时宿主回退 **`ask`**，不是 `allow`。拒载返回 `permission.rejected`；`Unable to load skill <id>` 只在 id **不存在**时出现。
 - 注册表项自带 `id` 时直接用；**没有 `id`** 时才按 §3.5 从 `path` / `location` 反推，并把反推过程写进 `inspect`。信封里的 `location` 是 `{directory}` 对象，**不是字符串，绝不当路径用**。
