@@ -173,3 +173,53 @@ opencode plugin list
 ```
 
 新进程 `run --standalone` 调用 `skill_management` 成功；`plugin remove github:sogeisetsu/opencode-skill-management` 正常，配置逐字节还原。
+
+---
+
+## Linux 真实宿主核验（WSL2 · Debian 13.5 · 2026-10-20）
+
+> 环境：WSL2 `Debian 13.5`（x86_64、glibc）、宿主 `opencode v2.0.32`（`@opencode/cli-linux-x64@2.0.32`，与 Windows 侧同版本）、`node v22.23.3`。
+> 隔离方式：全部装在临时 `$HOME/.skmgmt-verify`，用临时 `HOME` + 四个 `XDG_*` 指向该目录，跑完 `rm -rf`；跑前跑后都确认过真实 `~/.config/opencode`、`~/.local/share/opencode`、`~/.cache/opencode`、`~/.local/state/opencode` 不存在（零残留）。全程无 `sudo`、无 `apt`。**不要用 `/tmp` 做隔离目录**，原因见本节末尾。
+
+### (d) 逻辑层在 Linux 上是否同样通过 —— 通过（已证实）
+
+```bash
+node tools/verify.mjs
+# 全部通过：167 项
+```
+
+与 CI 的 `ubuntu-latest` job 同源同结果（harness 全程 `mkdtemp` 临时 `<config>`，不读真实配置）。
+
+### (e) 插件在 Linux 宿主里是否被加载 —— 加载成功，但 `plugin list` 默认看不见（已证实）
+
+```bash
+opencode plugin list
+# No plugins found
+
+opencode plugin list --builtin
+# …
+# skill_management   local   /home/suyue/.skmgmt-verify/home/.config/opencode/plugins/skill_management.js
+```
+
+- 本地目录插件**只出现在 `--builtin` 的输出里**；不带该 flag 时是 `No plugins found`，很容易被误判成"没装上"。所有核查一律带 `--builtin`。
+- `debug paths` 确认 data / config / cache / state / log / db 全部落在临时 `HOME` 下。
+
+### (f) Linux 上的 disable → 拒载 → enable 全链路 —— 通过（已证实）
+
+新进程 `opencode run --standalone --auto --format json`（消息是位置参数；`run` 会读 stdin，**脚本里必须 `< /dev/null`**，否则管道里剩下的脚本会被当成用户输入，实测出现过模型顺着脚本文本自己去跑 shell）。
+
+| 步骤 | 结果 |
+|---|---|
+| `skill_management {action:"disable", id:"probe"}` | ✅ 写入 `{ "action": "skill", "resource": "probe", "effect": "deny" } // skill_management`，并生成 `skill_management.state.json` |
+| 模型可见的 skill 列表里是否还有 `probe` | **没有**（模型答：no） |
+| 新进程调用 `skill {id:"probe"}` | `status=error`，`Permission denied: skill` |
+| `skill_management {action:"enable", id:"probe"}` | ✅ `定位方式：标记注释命中（文件内自证）`；「被删规则的来源：本工具写入」；「删除后的生效效果：build = allow」；`ℹ️ 另有 3 个 agent 结果不同：explore / title / summary = deny`；变空的 `permissions` 块一并清理 |
+| 再次调用 `skill {id:"probe"}` | `status=completed`，返回 `<skill_content name="probe">` |
+
+**待复核**：本次 `--format json` 的 `tool_use` 事件里错误形如 `{"status":"error","error":"Permission denied: skill"}`，没有出现 §(c) 记录的 `{"error":{"type":"permission.rejected",…}}` 外层结构。文案与宿主版本都和 Windows 侧一致，差异多半来自 `--format json` 事件的裁剪，但**不要据此改写 §(c) 的结论**，升级时一并复核。
+
+### 环境坑（与插件无关，但会误导核验）
+
+- **`/tmp` 在 `wsl.exe` 两次调用之间不保留**：写入的探针文件下次调用即消失，而 `uptime` 仍然连续（不是 VM 重启）。临时隔离目录放 `$HOME` 下、结束时删除，别指望 `/tmp`。
+- WSL 的 `PATH` 里有 `/mnt/c/.../npm`，`opencode` 会解析到 **Windows 的 v1**；Linux 核验必须用绝对路径调用 Linux 版二进制。
+- Debian 13.5 minimal 只有 `script` / `sudo`：没有 `xz`（Node 官方 `.tar.xz` 解不开，改用 `.tar.gz`）、没有 `git` / `python3` / `tmux` / `expect`。
