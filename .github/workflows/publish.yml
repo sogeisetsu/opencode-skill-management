@@ -46,5 +46,11 @@ jobs:
             *-*) DIST_TAG=next ;;
             *)   DIST_TAG=latest ;;
           esac
+          NAME="$(node -p "require('./package.json').name")"
+          # 幂等保护：重推 tag / 手动重跑时版本可能已经发过，直接跳过而不是红叉
+          if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "::notice::${NAME}@${VERSION} is already on the registry - nothing to publish."
+            exit 0
+          fi
           echo "publishing ${VERSION} with dist-tag ${DIST_TAG}"
           npm publish --tag "${DIST_TAG}"
