@@ -9,6 +9,7 @@
 node tools/verify.mjs                # 175 项断言；跑在临时 <config> 下，不碰真实配置
 node tools/verify.mjs --section G    # 只跑一段（A–G，按标题前缀匹配，大小写不敏感）
 node tools/install.mjs               # 幂等安装到 <config>/plugins/skill_management.js
+bash tools/linux-verify.sh           # Linux/WSL 全量验收：自带 Node/opencode，落 $HOME 下，跑完自清（无 sudo）
 ```
 
 - 仓库里的 `src/skill_management.js` 是**唯一源**；`<config>/plugins/` 下那份是安装产物，**别直接改**（改完必须重跑上面两条）。

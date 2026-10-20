@@ -223,3 +223,13 @@ opencode plugin list --builtin
 - **`/tmp` 在 `wsl.exe` 两次调用之间不保留**：写入的探针文件下次调用即消失，而 `uptime` 仍然连续（不是 VM 重启）。临时隔离目录放 `$HOME` 下、结束时删除，别指望 `/tmp`。
 - WSL 的 `PATH` 里有 `/mnt/c/.../npm`，`opencode` 会解析到 **Windows 的 v1**；Linux 核验必须用绝对路径调用 Linux 版二进制。
 - Debian 13.5 minimal 只有 `script` / `sudo`：没有 `xz`（Node 官方 `.tar.xz` 解不开，改用 `.tar.gz`）、没有 `git` / `python3` / `tmux` / `expect`。
+- **冷启动的临时 `HOME` 里，前两次 `plugin list --builtin` 会返回 `No plugins found`，第三次才列出全部（含 `skill_management`）**。重试即可，别据此判定"插件没加载"。这四条都已固化进 `tools/linux-verify.sh`。
+
+**固化后的复跑方式（已证实）**：
+
+```bash
+bash tools/linux-verify.sh        # 自带 Node + opencode 安装、临时 HOME、跑完自清；全程无 sudo
+# == 3) 全部通过：175 项
+# == 4) skill_management  local  …/plugins/skill_management.js
+# == 5) 真实家目录与跑前一致
+```
