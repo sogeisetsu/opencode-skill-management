@@ -149,6 +149,35 @@ opencode plugin list --builtin
 
 > npm 首发细节：未发布的包无法先配 trusted publisher（npm/cli#8544），所以 rc.0 由本机手工发布建包；首次发布会先出现 `0.0.0-stage` 临时占位，且 `latest` 也会被指向该版本。后续版本改由 CI 的 trusted publishing 发布。
 
+### D. `list` 的 state 列按调用者 agent 求值（v5 修复 · 2026-10-20）
+
+真实故障：另一次会话里 `list` 报告「装了 29 个，只有 `simplify` 可用，其余全是 disabled（被全局权限规则挡了）」，而同一时刻 `inspect` 说 `plan`/`build` 对 `grill-me` 是 allow、实际加载也成功、配置里根本没有 `permissions` 段。
+
+根因（两处）：
+
+| # | 位置 | 问题 |
+|---|---|---|
+| 1 | `src/skill_management.js` `actList`（旧 866 行） | 把所有 agent 的 `permissions` `flatMap` 拍平去重后求值。宿主 `findLast` 取最后一条命中，于是子 agent（`explorer`/`librarian`/`designer`/`fixer`/`observer`，以及内部 `title`/`summary` 的 `{*,*,deny}`）的 deny 被算到调用者头上。`simplify` 显示可用同样是巧合（`oracle` 里有一条同 id 的 allow 排在 deny 之后）。 |
+| 2 | `tools/verify.mjs` `agentItems()` | 夹具先 `...a` 再赋 `permissions:`，把 `withTitleDeny` 注入的 `{*,*,deny}` 覆盖掉了。所以「别的 agent 全 deny 不影响调用者」那条回归用例**一直是空跑的**，CI 抓不到上面的 bug。 |
+
+修复后：
+
+- `actList` 与 `inspect`/`disable`/`enable` 同源：`pickAgent(agents, ctx.__agentId)` → 该 agent 自己的 `permissions` 求值（规范 §3.6）；
+- 输出新增 `调用者 agent：` 行；`context.agent` 缺失或不在注册表时显式告警，不再静默用别的 agent 顶替；
+- 新增 `另有 K 个 skill 在其它 agent 下状态不同` 提示（仅 K > 0）；
+- 夹具保留 agent 自有规则并排在全局规则之后（与真实宿主一致）。
+
+证据：
+
+| 检查 | 结果 |
+|---|---|
+| `node tools/verify.mjs` | ✅ 175 项全过（新增 8 项；旧 167 项语义未变） |
+| 反向验证：把 `callerRules` 换回「合并去重」实现 | ✅ 新断言如期失败 3 项（`172 通过 / 3 失败`）：`别的 agent 全 deny 不影响调用者：统计仍是 0 disabled`、`…state 列仍全是 available`、`只有别的 agent deny 某个 id 时，调用者仍是 available` |
+| 真实宿主 e2e（`opencode run --standalone --auto --format json`，v2.0.32，新进程） | ✅ `发现 29 个、已禁用 0 个、ask 0 个。` / `调用者 agent：\`orchestrator\`` / `ℹ️ 另有 29 个 skill 在其它 agent 下状态不同`；29 行全是 `available` |
+| 与 `inspect` 的一致性 | ✅ 同一 id 的 `list` state 与 `inspect` 的结论一致（修复前二者互相矛盾） |
+
+> 「另有 29 个」不是异常：本机子 agent 集体 `skill:*` deny，所以对主 agent 可见的每个 skill 在子 agent 下都不同。用子 agent 调 `list` 时相应 skill 会显示 `disabled`，那也是对的。
+
 ### 真实宿主回归（v5 构建 · 2026-10-20）
 
 | 步骤 | 结果 |
@@ -161,7 +190,7 @@ opencode plugin list --builtin
 ## 复跑方式
 
 ```pwsh
-node tools/verify.mjs        # 167 项断言，跑在临时配置目录，不触碰真实配置
+node tools/verify.mjs        # 175 项断言，跑在临时配置目录，不触碰真实配置
 node tools/install.mjs       # 幂等安装到 <config>/plugins/
 ```
 

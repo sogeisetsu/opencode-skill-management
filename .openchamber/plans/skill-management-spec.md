@@ -276,6 +276,9 @@ eF = o({ id: kp, name: Jb, description: t.pipe(y), autoinvoke: k.pipe(y), path: 
 
 - 只输出 `id` / `name` / `description`（首行、截断）/ `path`，**绝不输出 `content`**（`ctx.skill.list()` 会带正文，取字段时显式丢弃）。
 - 末尾附统计：发现 N 个、已禁用 M 个、`ask` K 个。
+- **`state` 的作用域是调用者 agent**：按工具执行上下文的 `context.agent`，取**该 agent 自己**的 `permissions` 求值（§3.6），并输出一行 `调用者 agent：\`<id>\``。拿不到调用者（`context.agent` 缺失或不在注册表里）时必须显式告警，不得静默改用别的 agent 顶替。
+- **禁止**把所有 agent 的 `permissions` 合并去重后求值：那会把子 agent（`explorer` / `title` …）的 deny 泄漏给调用者。本机 2026-10-20 因此把 29 个里的 28 个误报成 `disabled`，而同一时刻 `inspect` 说 `allow`（§3.2 那条警告同样适用于 `list`）。
+- 跨 agent 差异：若存在「某个 id 在别的 agent 下结论与调用者不同」，在统计行后附一行 `ℹ️ 另有 K 个 skill 在其它 agent 下状态不同（详见 inspect 的逐 agent 表）`，只在 K > 0 时输出。注意：子 agent 本来就 deny，所以主 agent 调 `list` 时这行通常会出现，属正常。
 - 一致性：若 sidecar（§4.3）记录了某条规则而配置里已不存在，输出一行 `⚠️ sidecar 与配置不一致` 提示，不自动重放。
 
 来源归类规则（按 `path`）：
