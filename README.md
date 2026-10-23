@@ -120,9 +120,9 @@ CI（`.github/workflows/verify.yml`）在 `ubuntu-latest` 与 `windows-latest` �
 H 段是性能闸门（29 skills × 12 agents × 10 rules 下 `list` < 25 ms），I 段是发布闸门
 （`npm pack --dry-run` 内容、`exports` 可解析、`install.mjs` 副本与 `src` 逐字节一致）。
 
-- 设计规范：`.openchamber/plans/skill-management-spec.md`
-- 宿主实测与踩过的坑：`docs/preflight.md`
-- 验收证据：`docs/acceptance.md`
+- 设计规范：[.openchamber/plans/skill-management-spec.md](.openchamber/plans/skill-management-spec.md)
+- 宿主实测与踩过的坑：[docs/preflight.md](docs/preflight.md)
+- 验收证据：[docs/acceptance.md](docs/acceptance.md)
 
 ## License
 
