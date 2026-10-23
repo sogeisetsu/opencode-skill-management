@@ -208,27 +208,18 @@ header.header {
   cursor: pointer;
 }
 
-/* Hover is an orange outline; the actual selection is a solid orange row.
-   This keeps "current" and "about to pick" distinguishable in every theme. */
+/* Every row has the same resting colour; only the hovered row turns orange.
+   The trigger already names the current theme/language. */
 .oc-menu-list button:hover,
 .oc-menu-list a:hover {
-  background: transparent;
-  color: var(--oc-text-strong);
-  box-shadow: inset 0 0 0 1px var(--oc-interactive);
+  background: var(--oc-interactive);
+  color: #ffffff;
 }
 
 .oc-menu-list button:focus-visible,
 .oc-menu-list a:focus-visible {
-  box-shadow: inset 0 0 0 1px var(--oc-interactive);
-}
-
-.oc-menu-list button[aria-selected='true'],
-.oc-menu-list a[aria-current='page'],
-.oc-menu-list button[aria-selected='true']:hover,
-.oc-menu-list a[aria-current='page']:hover {
-  background: var(--oc-interactive);
-  color: #ffffff;
-  box-shadow: none;
+  outline: 1px solid var(--oc-interactive);
+  outline-offset: -1px;
 }
 
 .sidebar-pane {
