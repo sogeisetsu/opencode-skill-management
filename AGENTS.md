@@ -50,6 +50,47 @@ bash tools/linux-verify.sh           # Linux/WSL 全量验收：自带 Node/open
 - 宿主版本升级后，`docs/preflight.md` 每条都要重测；规范 §1.3 的类型漂移表与 §9 状态表最容易失效。
 - 别把密钥 / token / 本机私有配置内容写进仓库。
 
+## 发布（Release）
+
+仓库没有 `CONTRIBUTING.md`，发布政策以本节为准（v1.0.0 起）。
+
+**版本与 tag**
+
+- 版本遵循 SemVer；tag 必须是 **annotated**（`git tag -a`），且与 `package.json` 的 `version` 逐字一致 ——
+  `.github/workflows/publish.yml` 会校验 `GITHUB_REF_NAME == "v" + version`，不一致直接失败。
+- tag 由 `v*` 触发 `publish.yml` 发布到 npm（Trusted Publishing / OIDC，**不需要任何 token 或 secret**）；
+  无 `-` 后缀 → dist-tag `latest`，有后缀 → `next`。重复触发是幂等的（版本已存在则跳过）。
+
+| 级别 | 动作 |
+|---|---|
+| patch | 只打 tag，**不**建 GitHub Release |
+| minor / major | 打 tag **并**建 GitHub Release（英文 notes） |
+
+**Release 正文**
+
+- 先 `gh release list`（兼看 `git tag`）找上一个 **Release** 的 tag，正文写
+  `<上一个 Release tag>..<新 tag>` 的差异 —— **不是本版 commit 清单**，中间的 patch 改动也要写进去，
+  以用户视角描述（"修好了什么症状"而不是"改了哪个函数"）。
+- 1.0.0 起正文至少包含：这是什么 / 有哪些功能 / 怎么用 / 怎么下载（几种方式 + 推荐哪个）。
+- **双语**：Release 正文**只写英文**；中文版只放仓库 `docs/releases/<tag>.zh-CN.md`，**永不**追加进 Release 正文。
+
+**Release 附件不能只有 Source code**
+
+GitHub 自动生成的 `Source code (zip/tar.gz)` 是仓库快照，不算工具包。每次 Release 至少附两个真实产物：
+
+```pwsh
+npm pack --pack-destination <临时目录>          # → opencode-skill-management-X.Y.Z.tgz（与 npm 上同一个 tarball）
+gh release create vX.Y.Z --title "vX.Y.Z" --notes-file <英文 notes>.md `
+  <临时目录>/opencode-skill-management-X.Y.Z.tgz src/skill_management.js
+```
+
+- `skill_management.js`：**单文件插件**，下载后放进 `<config>/plugins/` 即可用（离线 / 无 npm 的首选）。
+- `opencode-skill-management-X.Y.Z.tgz`：`npm pack` 产物，供自行解包 / 内网镜像 / 核对 npm 上到底发了什么。
+- 验收：`gh release view vX.Y.Z` 的 asset 列表里必须能看到这两个名字。
+
+**推送前的门禁**：`node tools/verify.mjs` 全绿、`npm pack` 内容正确、安装副本与 `src` 逐字节一致；
+`git push` / `git push --tags` / `gh release create` 属于需要用户确认的动作（见根 AGENTS.md 硬约束）。
+
 ## 只读核查命令
 
 ```pwsh
