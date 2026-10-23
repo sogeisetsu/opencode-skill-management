@@ -247,6 +247,20 @@ bash tools/linux-verify.sh
 
 CI（`ubuntu-latest` + `windows-latest`）跑同一套 248 项断言。
 
+### 发布结果（2026-10-23）
+
+| 步骤 | 结果 |
+|---|---|
+| `git push origin main --tags` | `4dff757..4b566be  main` + `* [new tag] v1.0.0` |
+| CI `verify`（`ubuntu-latest` + `windows-latest`，run 39941791353） | ✅ 两个 job 都 success（同一套 248 项） |
+| CI `publish`（tag 触发，run 39941791346） | ✅ `+ opencode-skill-management@1.0.0`，dist-tag `latest`，SLSA provenance 已生成 |
+| 打包内容（CI 日志） | `CHANGELOG.md` / `LICENSE` / `README.md` / `package.json` / `src/skill_management.js`，5 files / 27.6 kB |
+| `npm view opencode-skill-management version dist-tags --prefer-online` | `1.0.0` / `{ latest: '1.0.0' }` |
+| `npm view …@1.0.0 dist.integrity` | `sha512-bO4h9dbHG5hzj…RO054XDRt7ymA==`（与 publish 日志一致） |
+| 本地 `node tools/install.mjs` | 安装副本与 `src` 同哈希 `2488834B…` |
+
+> 注：`npm view` 首次查询会被本地 npm 缓存回成 `0.2.0`，加 `--prefer-online` 或直接查 `registry.npmjs.org` 才是最新值（已用两种方式交叉核对）。
+
 ## 复跑方式
 
 ```pwsh
