@@ -46,9 +46,24 @@ function globToRegExp(pattern) {
   return new RegExp(out + "$")
 }
 
+// C4：无通配时 globToRegExp 就是对整串字面转义，因此「字面比较」是严格等价的快路径（零正则）。
+// 有通配时按模式缓存编译结果 —— list 一轮要做上万次匹配，重复编译纯属浪费。
+// 缓存设上界：插件常驻宿主进程，配置反复变更时不能让 Map 无界增长。
+const GLOB_CACHE_CAP = 256
+const globCache = new Map()
+
 export function globMatch(pattern, value) {
   // 参数顺序与宿主一致：matching(值, 模式)
-  return globToRegExp(pattern).test(String(value))
+  const p = String(pattern)
+  const v = String(value)
+  if (!p.includes("*") && !p.includes("?")) return p === v
+  let re = globCache.get(p)
+  if (re === undefined) {
+    if (globCache.size >= GLOB_CACHE_CAP) globCache.clear()
+    re = globToRegExp(p)
+    globCache.set(p, re)
+  }
+  return re.test(v)
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -201,19 +216,29 @@ export function parseJsonc(text) {
 
 /** 去掉注释后按严格 JSON 校验（用于捕获尾逗号这类"宽容解析看不出来"的问题） */
 export function strictValidate(text) {
+  // C5：按 token 偏移拼接，注释区间替换成**等长**空白（保留 CRLF）。
+  // 旧写法把整份配置展开成字符数组（60 KB 配置约 2.6 ms），写路径最多调用 3 次。
   const toks = tokenizeJsonc(text)
-  const chars = [...text]
+  let out = ""
+  let last = 0
   for (const t of toks) {
     if (t.t !== "comment") continue
-    for (let i = t.s; i < t.e; i++) if (chars[i] !== "\n" && chars[i] !== "\r") chars[i] = " "
+    out += text.slice(last, t.s) + t.v.replace(/[^\r\n]/g, " ")
+    last = t.e
   }
-  JSON.parse(chars.join(""))
+  JSON.parse(out + text.slice(last))
 }
 
 export function findTopLevelProp(root, key) {
   if (!root || root.type !== "object") return undefined
   for (let i = root.props.length - 1; i >= 0; i--) if (root.props[i].key === key) return root.props[i]
   return undefined
+}
+
+/** 顶层 permissions 数组项；没有该键或不是数组时返回 null（不猜） */
+function permissionsItems(root) {
+  const perm = findTopLevelProp(root, "permissions")
+  return perm && perm.value.type === "array" ? perm.value.items : null
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -308,6 +333,12 @@ export function insertRule(text, id, effect, opts = {}) {
     }
     // 退化情形（数组与项在同一行）：插在 ] 之前
     const bracketIndent = lineIndentAt(text, closeIdx) ?? itemIndent
+    // `]` 紧跟最后一项时两个编辑落在同一偏移（closeIdx === last.end），分开应用会把逗号插到
+    // 新项之后 → 得到 `...,\n  {新项}\n  ,]}` 这种非法结果。必须合并成一次插入。
+    if (closeIdx === last.end) {
+      const ins = `,${eol}${itemIndent}${item} // ${MARKER}${eol}${bracketIndent}`
+      return { text: applyEdits(text, [{ start: last.end, end: last.end, text: ins }]), createdBlock: false }
+    }
     const edits = [
       { start: last.end, end: last.end, text: "," },
       { start: closeIdx, end: closeIdx, text: `${eol}${itemIndent}${item} // ${MARKER}${eol}${bracketIndent}` },
@@ -387,12 +418,11 @@ export function findMarkedItem(text, id) {
 }
 
 /** 列出配置里所有"精确命中该 id 的全局规则"（action 匹配 skill）—— 歧义判据用 */
-export function findAllExactItems(text, id) {
-  const root = parseJsonc(text)
-  const perm = findTopLevelProp(root, "permissions")
-  if (!perm || perm.value.type !== "array") return []
+export function exactItems(root, id) {
+  const items = permissionsItems(root)
+  if (!items) return []
   const hits = []
-  for (const item of perm.value.items) {
+  for (const item of items) {
     if (item.type !== "object") continue
     const a = findTopLevelProp(item, "action")
     const r = findTopLevelProp(item, "resource")
@@ -400,6 +430,11 @@ export function findAllExactItems(text, id) {
     if (typeof a.value.value === "string" && globMatch(a.value.value, PERMISSION_ACTION) && r.value.value === id) hits.push(item)
   }
   return hits
+}
+
+/** 薄包装：从文本解析后再取。已有 root 的调用方（enable）直接用 exactItems，避免重复 parse */
+export function findAllExactItems(text, id) {
+  return exactItems(parseJsonc(text), id)
 }
 
 /** 该数组项是否带本工具标记（§4.3：标记写在规则所在行的行尾） */
@@ -493,22 +528,40 @@ export function resolveConfigDir(env = process.env, home = os.homedir()) {
   return path.join(base, "opencode")
 }
 
+/** 把 permissions 数组项映射成 { action, resource, effect } 三元组（读不出的字段留 undefined） */
+function itemsToRules(items) {
+  return (items ?? [])
+    .map((it) => {
+      const g = (k) => {
+        const p = findTopLevelProp(it, k)
+        return p ? p.value.value : undefined
+      }
+      return { action: g("action"), resource: g("resource"), effect: g("effect") }
+    })
+    .filter((r) => r && r.resource)
+}
+
 /** 读取目标配置文件里实际的 permissions 规则集；读不到返回 null（不猜） */
 export function readConfigRules(file) {
   try {
     const { text } = readTextFile(file)
+    return itemsToRules(permissionsItems(parseJsonc(text)))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * C3：一次读盘 + 一次解析，同时带出「是否有 permissions 数组」与已解析文档。
+ * resolveTargetConfig 为判断"哪个文件含 permissions"本来就要读一遍，结果却丢掉、后面再读一遍。
+ * 读不到 / 解析失败 → null（调用方按"该文件不含权限配置"处理，与旧 fileHasPermissions 一致）。
+ */
+function readPermissionsDoc(file) {
+  try {
+    const { text, bom, eol } = readTextFile(file)
     const root = parseJsonc(text)
-    const perm = findTopLevelProp(root, "permissions")
-    if (!perm || perm.value.type !== "array") return []
-    return perm.value.items
-      .map((it) => {
-        const g = (k) => {
-          const p = findTopLevelProp(it, k)
-          return p ? p.value.value : undefined
-        }
-        return { action: g("action"), resource: g("resource"), effect: g("effect") }
-      })
-      .filter((r) => r && r.resource)
+    const items = permissionsItems(root)
+    return { file, text, bom, eol, root, items }
   } catch {
     return null
   }
@@ -517,17 +570,6 @@ export function readConfigRules(file) {
 function isFile(p) {
   try {
     return fs.statSync(p).isFile()
-  } catch {
-    return false
-  }
-}
-
-function fileHasPermissions(file) {
-  try {
-    const { text } = readTextFile(file)
-    const root = parseJsonc(text)
-    const perm = findTopLevelProp(root, "permissions")
-    return Boolean(perm && perm.value.type === "array")
   } catch {
     return false
   }
@@ -547,20 +589,27 @@ export function resolveTargetConfig(env = process.env, home = os.homedir()) {
   const dirs = configDir === homeConfigDir ? [configDir] : [configDir, homeConfigDir]
   const names = ["opencode.json", "opencode.jsonc"] // jsonc 优先 → 取最后一个命中
 
+  // 候选文件只读一次：已解析文档随返回值带出（doc），调用方不必二次读盘解析。
+  const docs = new Map()
   const withPerms = []
   for (const d of dirs) {
     for (const n of names) {
       const f = path.join(d, n)
-      if (isFile(f) && fileHasPermissions(f)) withPerms.push(f)
+      if (!isFile(f)) continue
+      const doc = readPermissionsDoc(f)
+      if (!doc) continue // 读不到 / 解析失败 → 与旧 fileHasPermissions 一致：视作不含权限配置
+      docs.set(f, doc)
+      if (doc.items !== null) withPerms.push(f)
     }
   }
+  const docFor = (f) => docs.get(f) ?? readPermissionsDoc(f) ?? undefined
 
   const notes = []
   if (withPerms.length === 0) {
     const existing = names.map((n) => path.join(configDir, n)).filter(isFile)
     const file = existing.length > 0 ? existing[existing.length - 1] : path.join(configDir, "opencode.jsonc")
     notes.push(existing.length === 0 ? "未找到现有配置，将新建 opencode.jsonc" : "没有文档含 permissions，按候选顺序选最后一个已存在的文档")
-    return { file, configDir, configDirs: dirs, hadPermissions: false, notes }
+    return { file, configDir, configDirs: dirs, hadPermissions: false, notes, doc: docFor(file) }
   }
 
   const inConfig = withPerms.filter((f) => path.dirname(f) === configDir)
@@ -571,19 +620,21 @@ export function resolveTargetConfig(env = process.env, home = os.homedir()) {
     notes.push(
       `⚠️ ${configDir} 与 ${homeConfigDir} 都含权限配置；按规范 §4.1 取其一的实测提醒，写入 ~/.config/opencode 下的文件`,
     )
+    const file = isFile(pick) ? pick : path.join(homeConfigDir, "opencode.json")
     return {
-      file: isFile(pick) ? pick : path.join(homeConfigDir, "opencode.json"),
+      file,
       configDir,
       configDirs: dirs,
       hadPermissions: true,
       notes,
+      doc: docFor(file),
     }
   }
 
   const pool = inConfig.length > 0 ? inConfig : inHome
   const file = pool[pool.length - 1]
   notes.push("目标文件含现有 permissions，直接在其数组中追加/删除")
-  return { file, configDir, configDirs: dirs, hadPermissions: true, notes }
+  return { file, configDir, configDirs: dirs, hadPermissions: true, notes, doc: docFor(file) }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -599,7 +650,9 @@ export function loadSidecar(configDir) {
   try {
     const { text } = readTextFile(file)
     const data = JSON.parse(text)
-    if (!data || typeof data !== "object" || !Array.isArray(data.rules)) throw new Error("结构不符")
+    if (!data || typeof data !== "object" || !Array.isArray(data.rules)) throw new Error("结构不符：期望 { version, rules: [] }")
+    // 未知版本 = 别的/更晚的工具写的记录 → 不猜它的语义，按"读不到"处理（只报告，不重建）。
+    if (data.version !== undefined && data.version !== SIDECAR_VERSION) throw new Error(`不支持的 version：${JSON.stringify(data.version)}`)
     return { file, version: data.version ?? SIDECAR_VERSION, rules: data.rules, ok: true }
   } catch (err) {
     return { file, version: SIDECAR_VERSION, rules: [], ok: !fs.existsSync(file), error: String(err && err.message) }
@@ -912,7 +965,16 @@ async function actList(ctx) {
   }
 
   const recorded = side.rules.map((r) => r.id)
-  const configRules = readConfigRules(target.file)
+  // C3：resolveTargetConfig 已把目标文件读盘并解析过，直接用其中的 items；
+  // 只有拿不到文档（文件不存在 / 读不了，例如准备新建）时才回退 readConfigRules（保留其 null 语义）。
+  const configRules = target.doc ? itemsToRules(target.doc.items) : readConfigRules(target.file)
+
+  if (!side.ok) {
+    lines.push("")
+    lines.push(
+      `⚠️ sidecar \`${side.file}\` 读取失败（${side.error ?? "未知原因"}）：本次忽略它的记录，结论只来自实际规则集；\`enable\` 仍可靠行尾标记注释定位。`,
+    )
+  }
 
   // (1) sidecar 记录了某条规则，但配置里已无对应规则 → 不一致（规范 §3.1 / §4.4 要求的那条）
   if (side.ok && configRules !== null && side.rules.length > 0) {
@@ -941,7 +1003,7 @@ async function actList(ctx) {
   }
 
   // (3) sidecar 记的 id 已不在注册表里
-  const missing = recorded.filter((id) => !skills.some((s) => normalizeSkill(s).id === id))
+  const missing = recorded.filter((id) => !all.some((s) => s.id === id))
   if (missing.length > 0) {
     lines.push("")
     lines.push(`⚠️ sidecar 记的 ${missing.map((m) => `\`${m}\``).join("、")} 已不在注册表里（未自动重放）`)
@@ -1072,18 +1134,6 @@ async function actInspect(ctx, idRaw, nameRaw) {
   return lines.join("\n")
 }
 
-function findBroaderDenyInRules(rules, id) {
-  // 只看"调用者自己"被哪条更宽的 deny 规则覆盖；精确命中该 id 的规则不算"更宽"。
-  const list = ensureArray(rules)
-  for (let i = list.length - 1; i >= 0; i--) {
-    const r = list[i]
-    if (!r || r.effect !== "deny") continue
-    if (r.resource === id) continue
-    if (globMatch(r.action, PERMISSION_ACTION) && globMatch(r.resource, id)) return { rule: r, index: i }
-  }
-  return undefined
-}
-
 async function actDisable(ctx, idRaw, nameRaw, effectRaw, dryRun) {
   const { skills, agents } = await readContext(ctx)
   const all = skills.map((s) => normalizeSkill(s))
@@ -1096,9 +1146,10 @@ async function actDisable(ctx, idRaw, nameRaw, effectRaw, dryRun) {
   const out = []
   const agentId = ctx.__agentId
 
-  const callerRules = ensureArray(pickAgent(agents, agentId)?.permissions)
+  const caller = pickAgent(agents, agentId)
+  const callerRules = ensureArray(caller?.permissions)
   const current = stateOf(callerRules, id)
-  out.push(`调用者 agent：\`${pickAgent(agents, agentId)?.id ?? "(未知)"}\``)
+  out.push(`调用者 agent：\`${caller?.id ?? "(未知)"}\``)
   out.push(`目标：\`${id}\`（当前效果：${current.effect}）`)
 
   if (current.effect === "deny") {
@@ -1137,12 +1188,19 @@ async function actDisable(ctx, idRaw, nameRaw, effectRaw, dryRun) {
   if (fs.existsSync(target.file)) backupFile(target.file, target.configDir)
   writeTextFile(target.file, nextText, bom)
 
-  // 回读校验：优先走宿主 reload，再复核生效规则集（会轮询等待异步重载）
-  const verified = await verifyEffect(ctx, id, effect, pickAgent(agents, agentId)?.id)
+  // 回读校验：优先走宿主 reload，再复核生效规则集（会轮询等待异步重载）。
+  // C1：ask 的判据是「调用者规则集里该 {skill,id,ask} 三元组条数确实增加」——
+  // 与 verifyRuleRemoved 同一判据。旧判据 `caller !== "deny"` 恒为真（无规则命中回退 ask、
+  // agent 自有 allow 都不是 deny），于是宿主没读进规则也报「✅ 已写入并校验通过」。
+  const beforeCount = countExactRules(callerRules, id, effect)
+  const verified = await verifyEffect(ctx, id, effect, caller?.id, beforeCount)
   if (!verified.ok) {
     writeTextFile(target.file, text, bom)
     out.push("")
     out.push(`❌ 回读校验失败（期望 ${effect}，实际 ${verified.actual}）；已回滚，文件未留下半成品。`)
+    // 回滚后配置已复原，写入前的注册表快照又是准确的了 —— 顺手说明是谁挡的路
+    // （fast-responder 这类 agent 自有规则排在全局规则之后的典型情形）。
+    out.push(describeCallerHit(agents, agentId, id).text)
     return out.join("\n")
   }
 
@@ -1153,12 +1211,19 @@ async function actDisable(ctx, idRaw, nameRaw, effectRaw, dryRun) {
 
   out.push("")
   out.push(`✅ 已写入并校验通过：调用者 agent \`${verified.caller}\` = ${verified.actual}（${verified.via}）。sidecar：\`${sideFile}\``)
+  if (verified.actual !== effect) {
+    // N3：规则写入是真的（精确规则数增加了），但对调用者不产生该效果 —— 不许把它写成"已生效"。
+    out.push(
+      `ℹ️ 注意：规则确实已写入并被宿主读入（精确规则数 ${beforeCount}→${verified.count}），但对调用者 agent \`${verified.caller}\` 的**实际效果是 ${verified.actual}** —— 该 agent 自己的规则排在全局规则之后，覆盖了它；换其它 agent 调用时 ${effect} 才生效。`,
+    )
+  } else {
+    out.push(`规则集顺序：追加在末尾 → 对该 agent 优先级最高。`)
+  }
   if (verified.diverged && verified.diverged.length > 0) {
     out.push(
       `ℹ️ 另有 ${verified.diverged.length} 个 agent 结果不同（它们用自己的后续规则覆盖了全局规则）：${verified.diverged.map((d) => `\`${d.id}\`=${d.effect}`).join("、")}`,
     )
   }
-  out.push(`规则集顺序：追加在末尾 → 对该 agent 优先级最高。`)
   return out.join("\n")
 }
 
@@ -1268,23 +1333,37 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
   const files = [...new Set([target.file, record?.file && isFile(record.file) ? record.file : null].filter(Boolean))]
   const docs = []
   for (const f of files) {
+    let doc
     try {
       const { text, bom } = readTextFile(f)
-      docs.push({ file: f, text, bom })
+      doc = { file: f, text, bom }
     } catch {
-      /* 读不到的文件跳过；结论只来自实际读到的内容 */
+      continue // 读不到的文件跳过；结论只来自实际读到的内容
     }
+    try {
+      doc.root = parseJsonc(doc.text)
+    } catch {
+      doc.root = null // 解析不了的文档既不能定位也不能安全删除 → 按"没有规则"处理
+    }
+    docs.push(doc)
   }
 
   const out = []
   out.push(`目标：\`${id}\``)
   out.push(`调用者 agent：\`${callerName}\`（当前效果：${before.effect}）`)
   out.push(`目标文件：${files.map((f) => `\`${f}\``).join("、")}`)
+  const unparsable = docs.filter((d) => !d.root).map((d) => d.file)
+  if (unparsable.length > 0) {
+    // "结论只来自实际读到的内容"：解析不了的文档既不定位也不删，但必须说清，否则会读成"没有规则"。
+    out.push(
+      `⚠️ 无法解析（JSONC 语法错误？）的配置文件：${unparsable.map((f) => `\`${f}\``).join("、")} —— 未从中定位任何规则，请先修好语法。`,
+    )
+  }
 
   // 候选项 = 精确命中该 id、且效果为 deny/ask 的规则（allow 不是「挡路的规则」，不删）。
   const candidates = []
   for (const d of docs) {
-    for (const item of findAllExactItems(d.text, id)) {
+    for (const item of exactItems(d.root, id)) {
       const triple = itemTriple(item)
       if (triple.effect === "deny" || triple.effect === "ask") candidates.push({ ...d, item, triple })
     }
@@ -1297,19 +1376,19 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
       out.push("❌ 拒绝执行：配置里没有精确命中该 id 的全局规则 —— 挡路的不是这一行，删无可删。")
       out.push(describeCallerHit(agents, agentId, id).text)
       out.push("若命中的是 `policies` / `experimental.policies`，本工具无法读取（插件 ctx 没有 `config` 域），请手工核对。")
+      // 相关规则 = action 匹配 skill 且 resource 的 glob 能匹配该 id（精确命中的是它的子集）。
+      // 复用已解析的 root，用 file+偏移 的 Set 去重（旧实现是 related.some(...) 的 O(n²) + 二次 parse）。
       const related = []
+      const seen = new Set()
       for (const d of docs) {
-        for (const item of findAllExactItems(d.text, id)) related.push({ file: d.file, text: d.text, item })
-        // 更宽的规则也算「相关」：resource 的 glob 能匹配该 id
-        const root = parseJsonc(d.text)
-        const perm = findTopLevelProp(root, "permissions")
-        if (perm && perm.value.type === "array") {
-          for (const item of perm.value.items) {
-            if (item.type !== "object" || related.some((r) => r.item === item && r.file === d.file)) continue
-            const t = itemTriple(item)
-            if (typeof t.action === "string" && globMatch(t.action, PERMISSION_ACTION) && typeof t.resource === "string" && globMatch(t.resource, id)) {
-              related.push({ file: d.file, text: d.text, item })
-            }
+        for (const item of permissionsItems(d.root) ?? []) {
+          if (item.type !== "object") continue
+          const key = `${d.file}\u0000${item.start}`
+          if (seen.has(key)) continue
+          const t = itemTriple(item)
+          if (typeof t.action === "string" && globMatch(t.action, PERMISSION_ACTION) && typeof t.resource === "string" && globMatch(t.resource, id)) {
+            seen.add(key)
+            related.push({ file: d.file, text: d.text, item })
           }
         }
       }
@@ -1464,12 +1543,18 @@ function sleep(ms) {
  * 回读校验：宿主对配置文件的重新读入是**异步**的（文件 watch + 防抖），
  * 一次 reload 之后立刻读很可能还没生效 —— 实测踩过。所以这里轮询等待。
  * 判据以**调用者 agent** 为准（有些 agent 可能用自己的后续规则覆盖全局规则，那不该算失败，只报告）。
+ *
+ * 判据（C1）：
+ *  - deny：调用者规则集求值为 deny（已证有效，不动）。
+ *  - ask ：调用者规则集里该 `{skill, id, ask}` 三元组的**条数增加**（beforeCount → 更多）。
+ *    不能用「不是 deny」—— 宿主对无规则命中的 skill 回退 ask，agent 自有 allow 也不是 deny，
+ *    两者都会让校验恒真，连"宿主根本没读进规则"都报成功。
  */
-async function verifyEffect(ctx, id, expected, callerAgentId) {
+async function verifyEffect(ctx, id, expected, callerAgentId, beforeCount = 0) {
   const timeoutMs = Number(process.env.SKILL_MGMT_VERIFY_TIMEOUT_MS ?? 6000)
   const deadline = Date.now() + (Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 6000)
   let per = []
-  let caller = undefined
+  let pickedCount = beforeCount
   let polls = 0
   for (;;) {
     polls++
@@ -1485,17 +1570,28 @@ async function verifyEffect(ctx, id, expected, callerAgentId) {
       agents = []
     }
     if (agents.length > 0) {
-      per = agents.map((a) => ({ id: a.id, effect: stateOf(ensureArray(a.permissions), id).effect }))
+      per = agents.map((a) => {
+        const rules = ensureArray(a.permissions)
+        return {
+          id: a.id,
+          hidden: a.hidden,
+          effect: stateOf(rules, id).effect,
+          count: countExactRules(rules, id, expected),
+        }
+      })
       const picked = per.find((p) => p.id === callerAgentId) ?? per.find((p) => !p.hidden) ?? per[0]
-      caller = picked?.effect
-      const ok = expected === "deny" ? caller === "deny" : caller !== "deny"
+      const caller = picked?.effect
+      pickedCount = picked ? picked.count : beforeCount
+      const ok = expected === "deny" ? caller === "deny" : Boolean(picked) && picked.count > beforeCount
       if (ok) {
         return {
           ok: true,
           actual: caller,
           caller: picked?.id,
+          count: picked.count,
+          beforeCount,
           diverged: per.filter((p) => p.effect !== caller),
-          via: `ctx.agent.reload() + ctx.agent.list()（轮询 ${polls} 次）`,
+          via: `ctx.agent.reload() + ctx.agent.list()（轮询 ${polls} 次；精确规则数 ${beforeCount}→${picked.count}）`,
           polls,
         }
       }
@@ -1503,8 +1599,10 @@ async function verifyEffect(ctx, id, expected, callerAgentId) {
     if (Date.now() >= deadline) {
       return {
         ok: false,
-        actual: per.length > 0 ? per.map((p) => `${p.id}=${p.effect}`).join(", ") : "未验证（拿不到 agent 规则集）",
+        actual: per.length > 0 ? per.map((p) => `${p.id}=${p.effect}×${p.count}`).join(", ") : "未验证（拿不到 agent 规则集）",
         caller: per.find((p) => p.id === callerAgentId)?.id,
+        count: pickedCount,
+        beforeCount,
         diverged: [],
         via: `ctx.agent.reload() + ctx.agent.list()（轮询 ${polls} 次后超时）`,
         polls,

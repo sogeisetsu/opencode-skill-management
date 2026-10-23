@@ -171,7 +171,7 @@ opencode plugin list --builtin
 
 | 检查 | 结果 |
 |---|---|
-| `node tools/verify.mjs` | ✅ 175 项全过（新增 8 项；旧 167 项语义未变） |
+| `node tools/verify.mjs` | ✅ 248 项全过（v5 时 175 项；1.0.0 新增 N1–N14） |
 | 反向验证：把 `callerRules` 换回「合并去重」实现 | ✅ 新断言如期失败 3 项（`172 通过 / 3 失败`）：`别的 agent 全 deny 不影响调用者：统计仍是 0 disabled`、`…state 列仍全是 available`、`只有别的 agent deny 某个 id 时，调用者仍是 available` |
 | 真实宿主 e2e（`opencode run --standalone --auto --format json`，v2.0.32，新进程） | ✅ `发现 29 个、已禁用 0 个、ask 0 个。` / `调用者 agent：\`orchestrator\`` / `ℹ️ 另有 29 个 skill 在其它 agent 下状态不同`；29 行全是 `available` |
 | 与 `inspect` 的一致性 | ✅ 同一 id 的 `list` state 与 `inspect` 的结论一致（修复前二者互相矛盾） |
@@ -187,10 +187,70 @@ opencode plugin list --builtin
 | `enable grill-me` | ✅ `定位方式：标记注释命中（文件内自证）`；来源=本工具；删除后 `orchestrator` = allow；列出 8 个自有规则覆盖的 agent |
 | 还原 | ✅ **逐字节一致** 回到 `7D16F8A3…` / 15014 bytes；空 `permissions` 块已清理；sidecar 回到空规则集 |
 
+## 1.0.0 验收（2026-10-23 · 修 ask 校验空转 + 全面测试）
+
+基线（执行前）：
+
+```
+C:\Users\suyue\.config\opencode\opencode.jsonc
+  sha256 = 7AE5B60A457D8BCB297EC55CBBC3A71F477AD94967979A810A12C4AA01EA6750
+  bytes  = 15373      （无 permissions 键；含 plugins 数组）
+```
+
+### 修复项与实证
+
+| # | 内容 | 证据 |
+|---|---|---|
+| C1 | `ask` 回读校验不再判「不是 deny」 | N1 在改前**跑红 4 项**（宿主没读进规则也报「✅ 已写入并校验通过」，并留下文件改动）；改成「调用者规则集里该三元组条数增加」后转绿。N3 证明「规则写入成功但被 agent 自有 allow 覆盖」时会写明实际效果 |
+| — | 顺手发现的 2 个 bug | ① `insertRule` 在单行数组 `{"permissions":[{…}]}` 上把逗号插到新项之后，产出非法 JSONC（N8 暴露）；② `loadSidecar` 把未知 `version` 当有效记录（N7 暴露） |
+| C2/C3 | 删死代码、去重取值、`list` 只解析一次 | 行为断言未变（175 项旧断言语义全部保留） |
+| C4/C5 | glob 快路径 + 有界缓存、`strictValidate` 按 token 拼接 | 同一夹具 60 次中位数：**3.72 ms → 2.24 ms**（1.66×，−1.48 ms；13.6 KB 配置、29 skills × 12 agents × 10 rules） |
+
+### L1 单进程（Windows）
+
+```pwsh
+node tools/verify.mjs     # 全部通过：248 项（A–I）
+```
+
+### L3 真实宿主（新进程，`opencode run --standalone --auto --format json`，v2.0.32）
+
+| 步骤 | 结果 |
+|---|---|
+| (a) `list` vs 系统提示 `available_skills` | `list` 32 个、全部 `available`、调用者 `orchestrator`；系统提示 31 个。**差集恰好是 `grill-me`**（`autoinvoke=off` → 宿主不注入模型可见列表），其余名字逐一相同 |
+| (b1) `disable grill-me`（先 `dryRun` 预览，零写入） | ✅ `15373 → 15485` bytes（+112）；输出含 `精确规则数 0→1` —— 证明跑的是 1.0.0 代码（本机同时装了 npm `0.2.0`，输出里没有这个字段） |
+| (b2) 新进程 `skill {id:"grill-me"}` | `status=error` → `{"error":{"type":"permission.rejected","message":"Permission denied: skill"}}` |
+| (b3) 同进程对照 `skill {id:"grilling"}` | `status=completed` —— 拒载是个别 skill，不是整个 `skill` 工具被禁 |
+| (b4) 新进程 `list` | `grill-me = disabled`、`grilling = available`；`发现 32 个、已禁用 1 个、ask 0 个` |
+| (c) `enable grill-me` | `定位方式：标记注释命中（文件内自证）`；空的 `permissions` 块一并清理；`删除后的生效效果：orchestrator = allow`；`ℹ️ 另有 7 个 agent 结果不同`（title/summary/explorer/oracle/designer/fixer/observer） |
+| (c) 还原 | sha256 回到 `7AE5B60A…`、`15373` bytes（逐字节一致）；sidecar `rules: []` |
+
+### 发布闸门
+
+| 检查 | 结果 |
+|---|---|
+| `npm pack --dry-run` 内容 | 只含 `package.json` / `README.md` / `LICENSE` / `CHANGELOG.md` / `src/**` |
+| `exports["."]` 按包名 self-reference 解析 | ✅ 解析出的入口注册了四个动作（`list`/`inspect`/`disable`/`enable`） |
+| `node tools/install.mjs` 副本 | ✅ 与 `src` 逐字节一致；重复执行为幂等（`已是最新`） |
+
+### L2 跨平台（Linux，WSL Debian）
+
+```bash
+bash tools/linux-verify.sh
+# == 3) 全部通过：248 项
+# == 4) skill_management  local  …/plugins/skill_management.js
+# == 5) 真实家目录与跑前一致
+```
+
+首轮跑红暴露的是**验收脚本自己的隔离缺陷**（不是插件问题）：`opencode --version` 也会在 `$HOME` 下建
+`~/.config/opencode` 与 `~/.local/share/opencode/log/opencode.log`，而脚本到第 4 步才切临时 `HOME`，
+于是在干净机器上第 5 步必然报「真实配置目录被改动了」。已把 `export HOME/XDG_*` 提前到第 0 步，复跑通过。
+
+CI（`ubuntu-latest` + `windows-latest`）跑同一套 248 项断言。
+
 ## 复跑方式
 
 ```pwsh
-node tools/verify.mjs        # 175 项断言，跑在临时配置目录，不触碰真实配置
+node tools/verify.mjs        # 248 项断言，跑在临时配置目录，不触碰真实配置
 node tools/install.mjs       # 幂等安装到 <config>/plugins/
 ```
 

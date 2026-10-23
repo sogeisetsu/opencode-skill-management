@@ -74,6 +74,19 @@ opencode plugin list --builtin
 - 回读校验的判据必须是**调用者 agent 是否达到期望效果**，而不是"所有 agent 都达到"。
 - 若有 agent 用自己的后续规则覆盖了全局规则，应当**报告**而不是判失败（实现里会输出一行 `ℹ️ 另有 N 个 agent 结果不同…`）。
 
+### 关键教训：`ask` 的回读校验不能判「不是 deny」（1.0.0 修）
+
+两条宿主事实叠在一起会让「不是 deny」恒真：
+
+1. **无任何规则命中时宿主回退 `ask`**（`stateOf` 复制了这条语义）；
+2. agent 自有规则可能排在**全局规则之后**，把刚写入的 `ask` 覆盖成 `allow`。
+
+于是「宿主根本没读进这条规则」时，调用者仍然是 `ask`（规则 1）或 `allow`（规则 2）—— 两者都不是 `deny`，旧判据直接报「✅ 已写入并校验通过」，甚至把 `actual=allow` 打印出来。
+
+现在的判据与 `enable` 同源：**调用者规则集里该 `{skill, id, ask}` 三元组的条数增加**（`countExactRules` 的 `beforeCount → afterCount`）。`deny` 仍用「调用者求值为 deny」（已证有效）。若条数增加但实际效果不是 `ask`（规则 2），输出会写明「实际效果是 allow」。
+
+回归用例：`tools/verify.mjs` 的 N1（`staleAgents + effect:"ask"`，改前 4 项全红）与 N3（规则写入成功但被 agent 自有 allow 覆盖）。
+
 ### 观察到的拒绝形态（与规范原文不同）
 
 规范原先写"加载失败信息为 `Unable to load skill <id>`"。实测拒载时得到的是**权限拒绝**：
@@ -223,13 +236,14 @@ opencode plugin list --builtin
 - **`/tmp` 在 `wsl.exe` 两次调用之间不保留**：写入的探针文件下次调用即消失，而 `uptime` 仍然连续（不是 VM 重启）。临时隔离目录放 `$HOME` 下、结束时删除，别指望 `/tmp`。
 - WSL 的 `PATH` 里有 `/mnt/c/.../npm`，`opencode` 会解析到 **Windows 的 v1**；Linux 核验必须用绝对路径调用 Linux 版二进制。
 - Debian 13.5 minimal 只有 `script` / `sudo`：没有 `xz`（Node 官方 `.tar.xz` 解不开，改用 `.tar.gz`）、没有 `git` / `python3` / `tmux` / `expect`。
-- **冷启动的临时 `HOME` 里，前两次 `plugin list --builtin` 会返回 `No plugins found`，第三次才列出全部（含 `skill_management`）**。重试即可，别据此判定"插件没加载"。这四条都已固化进 `tools/linux-verify.sh`。
+- **冷启动的临时 `HOME` 里，前两次 `plugin list --builtin` 会返回 `No plugins found`，第三次才列出全部（含 `skill_management`）**。重试即可，别据此判定"插件没加载"。
+- **`opencode --version` 也会在 `$HOME` 下建目录**（`~/.config/opencode`、`~/.local/share/opencode/log/opencode.log`）。所以隔离必须在**第一次调用 opencode 之前**就切好 `HOME`/`XDG_*`；否则"没写真实家目录"的检查在干净机器上必然报错（1.0.0 验收时实测踩到，`tools/linux-verify.sh` 已把 `export HOME=…` 提前到第 0 步）。以上五条都已固化进 `tools/linux-verify.sh`。
 
 **固化后的复跑方式（已证实）**：
 
 ```bash
 bash tools/linux-verify.sh        # 自带 Node + opencode 安装、临时 HOME、跑完自清；全程无 sudo
-# == 3) 全部通过：175 项
+# == 3) 全部通过：248 项
 # == 4) skill_management  local  …/plugins/skill_management.js
 # == 5) 真实家目录与跑前一致
 ```

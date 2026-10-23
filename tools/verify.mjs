@@ -2,22 +2,30 @@
 /**
  * skill_management 验收脚本（可重复跑）
  *
- *   node tools/verify.mjs            # 全部测试
+ *   node tools/verify.mjs            # 全部测试（248 项）
  *   node tools/verify.mjs --keep     # 不删除临时目录（排查用）
+ *   node tools/verify.mjs --section E  # 只跑某一段（A–I，按标题前缀匹配）
  *
  * 覆盖：
  *  A 模块形状 / 纯度（无第三方依赖、无 shell）
  *  B glob 与权限求值（findLast + 无命中回退 ask）
  *  C id 推导 / 来源与 scope 归类
- *  D JSONC 最小文本编辑（新增/删除/新建块/CRLF/BOM/严格校验）
+ *  D JSONC 最小文本编辑（新增/删除/新建块/CRLF/BOM/严格校验）+ 极端形状 + 失败路径
+ *  D2 §4.1 目标文件解析（XDG / 家目录 / 双目录冲突）
  *  E 端到端：在临时配置目录上跑 disable / dryRun / enable，含备份、sidecar、回读校验、拒绝分支
+ *  F 反推 id（§3.5）与 enable 归属边界
+ *  G §11 变更（备份 1 份 + 原子写 + description）
+ *  H 性能闸门（29 skills × 12 agents × 10 rules 下 list < 25 ms，软阈值）
+ *  I 发布闸门（npm pack 内容 / exports 可解析 / install.mjs 副本逐字节一致）
  *
- * 本脚本**不触碰**真实全局配置：整个 E 组跑在临时 <config>/opencode 下。
+ * 本脚本**不触碰**真实全局配置：整个 E 组跑在临时 <config>/opencode 下，
+ * install.mjs 那一步也把 XDG_CONFIG_HOME 指到临时目录。
  */
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { execFileSync, execSync } from "node:child_process"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(__dirname, "..")
@@ -245,6 +253,110 @@ section("D JSONC 最小文本编辑")
   // 非法输入必须中止而不是乱写
   ok("根不是对象 → 抛错", (() => { try { mod.insertRule("[1,2]", "x", "deny"); return false } catch { return true } })())
   ok("permissions 不是数组 → 抛错", (() => { try { mod.insertRule('{\n  "permissions": {}\n}', "x", "deny"); return false } catch { return true } })())
+
+  // ── N8：配置极端形状（解析边界） ──
+  {
+    const oneLine = '{"permissions":[{"action":"skill","resource":"x","effect":"deny"}]}\n'
+    const insOne = mod.insertRule(oneLine, "y", "deny")
+    mod.strictValidate(insOne.text)
+    ok("N8 单行数组：插入后仍合法", (() => { try { mod.strictValidate(insOne.text); return true } catch { return false } })())
+    ok("N8 单行数组：两条规则都在", parseStrict(insOne.text).permissions.length === 2, insOne.text)
+    ok("N8 单行数组：跳过带标记的规则", Boolean(insOne.text.match(/\/\/ skill_management/)))
+    ok("N8 单行数组：仍能精确列出目标 id", mod.findAllExactItems(insOne.text, "x").length === 1)
+
+    const withComment =
+      '{\n' +
+      '  "permissions": [\n' +
+      '    { "action": "skill", "resource": "x", "effect": "deny" } // 手工写的一行\n' +
+      '  ]\n' +
+      '}\n'
+    ok("N8 项带行尾注释：仍能被精确列出", mod.findAllExactItems(withComment, "x").length === 1)
+    ok("N8 项带行尾注释：注释不含标记 → 不认作本工具写入", mod.findMarkedItem(withComment, "x") === undefined)
+
+    // 重复 permissions 键：宿主/JSON.parse 取最后一个；本工具必须与之一致
+    const dup =
+      '{\n  "permissions": [],\n  "permissions": [\n    { "action": "bash", "resource": "*", "effect": "allow" }\n  ]\n}\n'
+    const insDup = mod.insertRule(dup, "y", "deny")
+    mod.strictValidate(insDup.text)
+    ok("N8 重复 permissions 键：追加进最后一个数组（与 JSON.parse 同语义）", parseStrict(insDup.text).permissions.length === 2, insDup.text)
+    ok("N8 重复 permissions 键：第一个空数组原样不动", insDup.text.includes('"permissions": [],'))
+
+    // 尾逗号：宽容解析看不出来，严格校验必须拒绝
+    ok("N8 尾逗号被严格校验拒绝", (() => { try { mod.strictValidate('{\n  "permissions": [],\n}\n'); return false } catch { return true } })())
+    ok("N8 非对象根：findAllExactItems 返回空而不是抛错", mod.findAllExactItems("[1,2]", "x").length === 0)
+    const nonObj = path.join(tmpRoot, "n8-nonobject.json")
+    fs.writeFileSync(nonObj, "[1,2]\n", "utf8")
+    ok("N8 非对象根：readConfigRules 返回空数组（不是 null）", JSON.stringify(mod.readConfigRules(nonObj)) === "[]")
+    ok("N8 读不到的文件：readConfigRules 返回 null（不猜）", mod.readConfigRules(path.join(tmpRoot, "n8-missing.json")) === null)
+  }
+
+  // ── N9：marker 干扰（归属判定只看"该项自己那一行"的行尾注释） ──
+  {
+    const cfg =
+      '{\n' +
+      '  "permissions": [\n' +
+      '    { "action": "skill", "resource": "a", "effect": "deny" }, // 手工加的一行\n' +
+      '    { "action": "skill", "resource": "b", "effect": "deny" }, // 确认过：skill_management 写的\n' +
+      '    { "action": "skill", "resource": "c", "effect": "deny" }\n' +
+      '  ]\n' +
+      '}\n'
+    const ia = mod.findAllExactItems(cfg, "a")[0]
+    const ib = mod.findAllExactItems(cfg, "b")[0]
+    const ic = mod.findAllExactItems(cfg, "c")[0]
+    ok("N9 同一行只有别的注释 → 不算本工具写入", mod.itemHasMarker(cfg, ia) === false)
+    ok("N9 同一行注释里含 marker 字样 → 认作本工具写入（§4.3 同行标记）", mod.itemHasMarker(cfg, ib) === true)
+    ok("N9 无注释的项不算本工具写入", mod.itemHasMarker(cfg, ic) === false)
+    ok("N9 标记不会串到相邻项", mod.findMarkedItem(cfg, "a") === undefined && mod.findMarkedItem(cfg, "c") === undefined)
+    ok("N9 findMarkedItem 命中带标记的那一条", mod.findMarkedItem(cfg, "b")?.start === ib.start)
+  }
+
+  // ── N6：BOM + 中文注释 + CRLF 的往返（读写原语层，逐字节） ──
+  {
+    const file = path.join(tmpRoot, "roundtrip.jsonc")
+    const text =
+      '{\r\n' +
+      '  // 中文注释：这一行必须逐字保留\r\n' +
+      '  "$schema": "https://opencode.ai/config.json",\r\n' +
+      '  "permissions": [\r\n' +
+      '    { "action": "bash", "resource": "*", "effect": "allow" } // 手工注释\r\n' +
+      '  ],\r\n' +
+      '  "shell": "pwsh"\r\n' +
+      '}\r\n'
+    const originalBuf = Buffer.from("\ufeff" + text, "utf8")
+    fs.writeFileSync(file, originalBuf)
+    const r = mod.readTextFile(file)
+    ok("N6 读回识别 BOM 且正文不含 BOM", r.bom === true && r.text.startsWith("{\r\n"))
+    const ins = mod.insertRule(r.text, "windows-shell", "deny")
+    mod.strictValidate(ins.text)
+    mod.writeTextFile(file, ins.text, r.bom)
+    const r2 = mod.readTextFile(file)
+    const item = mod.findMarkedItem(r2.text, "windows-shell")
+    ok("N6 往返：插入后仍能定位带标记的项", Boolean(item))
+    const removed = mod.removeRuleByLine(r2.text, item)
+    const cleaned = mod.removePermissionsBlockIfEmpty(removed)
+    mod.writeTextFile(file, cleaned ?? removed, r2.bom)
+    const back = fs.readFileSync(file)
+    ok("N6 disable→enable 后与原文件逐字节一致（BOM + CRLF + 中文注释）", back.equals(originalBuf), JSON.stringify(back.toString("utf8")))
+    ok("N6 往返后 BOM 仍在", back[0] === 0xef && back[1] === 0xbb && back[2] === 0xbf)
+    ok("N6 往返后仍是全 CRLF", !/[^\r]\n/.test(back.toString("utf8").slice(1)))
+  }
+
+  // ── N11：writeTextFile 失败路径（抛错、不留 .tmp、不静默） ──
+  {
+    const dir = path.join(tmpRoot, "n11")
+    fs.mkdirSync(dir, { recursive: true })
+    const dest = path.join(dir, "opencode.jsonc")
+    fs.mkdirSync(dest) // 让 rename(tmp, dest) 失败（目标是目录）
+    let threw = false
+    try {
+      mod.writeTextFile(dest, "{}\n", false)
+    } catch {
+      threw = true
+    }
+    ok("N11 writeTextFile 失败时抛错（不静默）", threw)
+    ok("N11 失败后不留 .tmp", !fs.existsSync(`${dest}.tmp`))
+    ok("N11 失败后目标未被替换", fs.statSync(dest).isDirectory())
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -343,11 +455,13 @@ const skills = [
 ]
 
 function makeCtx(opts = {}) {
-  const agents = [
-    { id: "build", hidden: false, permissions: [] },
-    { id: "plan", hidden: false, permissions: [] },
-  ]
-  if (opts.withTitleDeny) agents.push({ id: "title", hidden: true, permissions: [{ action: "*", resource: "*", effect: "deny" }] })
+  const agents = opts.agents
+    ? opts.agents.map((a) => ({ ...a }))
+    : [
+        { id: "build", hidden: false, permissions: [] },
+        { id: "plan", hidden: false, permissions: [] },
+      ]
+  if (!opts.agents && opts.withTitleDeny) agents.push({ id: "title", hidden: true, permissions: [{ action: "*", resource: "*", effect: "deny" }] })
   const readRules = () => {
     try {
       const { text } = mod.readTextFile(CFG)
@@ -575,24 +689,158 @@ async function call(action, args = {}) {
     ok("该情形下文件未变", fs.readFileSync(CFG).toString("utf8").includes('"resource": "*"'))
   }
 
-  // 回滚路径：写后生效校验拿不到期望效果 → 必须回滚且文件字节不变
+  // N4 回滚路径：写后生效校验拿不到期望效果 → 必须回滚且文件字节不变
   {
     process.env.SKILL_MGMT_VERIFY_TIMEOUT_MS = "400"
     cfgsWrite(ORIGINAL)
     const before = fs.readFileSync(CFG)
     const r = await callWith({ staleAgents: true }, "disable", { id: "windows-shell" })
-    ok("生效校验失败时报告失败并回滚", r.text.includes("回读校验失败") && r.text.includes("已回滚"), r.text)
-    ok("回滚后文件逐字节不变", fs.readFileSync(CFG).equals(before))
+    ok("N4 deny 生效校验失败时报告失败并回滚", r.text.includes("回读校验失败") && r.text.includes("已回滚"), r.text)
+    ok("N4 回滚后文件逐字节不变", fs.readFileSync(CFG).equals(before))
     ok(
-      "回滚后不写 sidecar 记录",
+      "N4 回滚后不写 sidecar 记录",
+      !JSON.parse(fs.readFileSync(path.join(tmpConfigDir, "skill_management.state.json"), "utf8")).rules.some((r) => r.id === "windows-shell"),
+    )
+    ok("N4 回滚时说明调用者规则集里实际命中的是哪一条", r.text.includes("的规则集 rules[") || r.text.includes("没有命中规则"), r.text)
+    delete process.env.SKILL_MGMT_VERIFY_TIMEOUT_MS
+  }
+
+  // N1（回归 · bug 实证）：ask 的回读校验不得空转。
+  // 宿主对「没有规则命中」的 skill 回退 ask，夹具 staleAgents 下调用者是 allow —— 两者都不是 deny，
+  // 旧判据 `caller !== "deny"` 于是恒为真：规则根本没被读进注册表也报「✅ 已写入并校验通过」。
+  {
+    process.env.SKILL_MGMT_VERIFY_TIMEOUT_MS = "400"
+    cfgsWrite(ORIGINAL)
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    const before = fs.readFileSync(CFG)
+    const r = await callWith({ staleAgents: true }, "disable", { id: "windows-shell", effect: "ask" })
+    ok("N1 ask 回读校验不得空转（宿主没读进规则时必须失败）", r.text.includes("回读校验失败") && r.text.includes("已回滚"), r.text)
+    ok("N1 ask 失败时不谎报成功", !r.text.includes("✅"), r.text)
+    ok("N1 ask 失败后文件逐字节不变", fs.readFileSync(CFG).equals(before))
+    ok(
+      "N1 ask 失败后不写 sidecar 记录",
       !JSON.parse(fs.readFileSync(path.join(tmpConfigDir, "skill_management.state.json"), "utf8")).rules.some((r) => r.id === "windows-shell"),
     )
     delete process.env.SKILL_MGMT_VERIFY_TIMEOUT_MS
   }
 
-  // §3.1/§4.4 一致性：sidecar 有记录但配置里已无对应规则 → 必须告警，且该 skill 显示为可用
+  // N2 ask 正向：✅ + 配置里确实写 ask + sidecar 记 ask + 输出能自证条数 0→1
   {
     cfgsWrite(ORIGINAL)
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    const r = await call("disable", { id: "windows-shell", effect: "ask" })
+    ok("N2 ask 成功", r.text.includes("✅"), r.text)
+    const written = fs.readFileSync(CFG, "utf8")
+    ok("N2 配置里写入的是 effect: \"ask\"", written.includes('"resource": "windows-shell", "effect": "ask"'), written)
+    const st = JSON.parse(fs.readFileSync(path.join(tmpConfigDir, "skill_management.state.json"), "utf8"))
+    ok("N2 sidecar 记的是 ask", st.rules.find((x) => x.id === "windows-shell")?.effect === "ask", JSON.stringify(st))
+    ok("N2 输出含精确规则数 0→1（能自证读入）", r.text.includes("精确规则数 0→1"), r.text)
+    const l = (await call("list")).text
+    ok("N2 list 把该 skill 显示为 ask", /\| windows-shell \|[^\n]*\| ask \|/.test(l), l)
+    const e = await call("enable", { id: "windows-shell" })
+    ok("N2 清理：enable 能删掉 ask 规则并逐字节还原", e.text.includes("✅") && fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")), e.text)
+  }
+
+  // N3 ask 但该 agent 有自己的后置 allow 规则：规则确实写入，输出必须写明实际生效是 allow
+  {
+    cfgsWrite(ORIGINAL)
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    const r = await callWith(
+      { agentRules: { build: [{ action: "skill", resource: "windows-shell", effect: "allow" }] } },
+      "disable",
+      { id: "windows-shell", effect: "ask" },
+    )
+    ok("N3 规则确实写入了配置", fs.readFileSync(CFG, "utf8").includes('"resource": "windows-shell", "effect": "ask"'), fs.readFileSync(CFG, "utf8"))
+    ok("N3 仍报写入成功（回读确认条数增加）", r.text.includes("✅") && r.text.includes("精确规则数 0→1"), r.text)
+    ok("N3 必须显式说明实际效果是 allow（不谎报已生效）", r.text.includes("实际效果是 allow"), r.text)
+    ok("N3 不得再说「对该 agent 优先级最高」", !r.text.includes("对该 agent 优先级最高"), r.text)
+    cfgsWrite(ORIGINAL)
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+  }
+
+  // N5 单条 disable 只改 1 行；注释/缩进/键序/BOM/EOL 逐字节不变
+  {
+    const text =
+      '{\r\n' +
+      '  // 中文注释：这一行必须逐字保留\r\n' +
+      '  "$schema": "https://opencode.ai/config.json",\r\n' +
+      '  "permissions": [\r\n' +
+      '    { "action": "bash", "resource": "*", "effect": "allow" }\r\n' +
+      '  ],\r\n' +
+      '  "shell": "pwsh",\r\n' +
+      '  "plugins": ["a", "b"]\r\n' +
+      '}\r\n'
+    const originalBuf = Buffer.from("\ufeff" + text, "utf8")
+    fs.writeFileSync(CFG, originalBuf)
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    const r = await call("disable", { id: "windows-shell" })
+    ok("N5 前置：disable 成功", r.text.includes("✅"), r.text)
+    const expected =
+      "\ufeff" +
+      text.replace(
+        '    { "action": "bash", "resource": "*", "effect": "allow" }\r\n',
+        '    { "action": "bash", "resource": "*", "effect": "allow" },\r\n' +
+          '    { "action": "skill", "resource": "windows-shell", "effect": "deny" } // skill_management\r\n',
+      )
+    const actual = fs.readFileSync(CFG)
+    ok("N5 除新增的 1 行（+1 个逗号）外逐字节不变", actual.equals(Buffer.from(expected, "utf8")), `实际：\n${actual.toString("utf8")}`)
+    ok("N5 BOM 仍在", actual[0] === 0xef && actual[1] === 0xbb && actual[2] === 0xbf)
+    ok("N5 仍是全 CRLF", !/[^\r]\n/.test(actual.toString("utf8").slice(1)))
+    const e = await call("enable", { id: "windows-shell" })
+    ok("N5 复原：enable 后逐字节回到原文件", e.text.includes("✅") && fs.readFileSync(CFG).equals(originalBuf), e.text)
+  }
+
+  // N7 sidecar 损坏（非法 JSON / rules 非数组 / 未知 version）→ ok=false，list 不崩且给提示
+  {
+    cfgsWrite(ORIGINAL)
+    const sideFile = path.join(tmpConfigDir, "skill_management.state.json")
+    const cases = [
+      ["非法 JSON", "{ not json"],
+      ["rules 不是数组", '{"version":1,"rules":{}}'],
+      ["未知 version", '{"version":99,"rules":[]}'],
+      ["根不是对象", "[1,2]"],
+    ]
+    for (const [name, body] of cases) {
+      fs.writeFileSync(sideFile, body, "utf8")
+      const s = mod.loadSidecar(tmpConfigDir)
+      ok(`N7 sidecar ${name} → ok=false（不猜）`, s.ok === false && s.rules.length === 0, JSON.stringify({ ok: s.ok, err: s.error }))
+      const l = (await call("list")).text
+      ok(`N7 sidecar ${name} → list 不崩且给出提示`, !l.includes("❌") && l.includes("sidecar") && l.includes("读取失败"), l.slice(-400))
+    }
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+  }
+
+  // N10 幂等：disable→disable→enable→enable，最终文件与 sidecar 完全复原
+  {
+    cfgsWrite(ORIGINAL)
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    const sideFile = path.join(tmpConfigDir, "skill_management.state.json")
+    const sideBefore = fs.readFileSync(sideFile)
+    const d1 = await call("disable", { id: "windows-shell" })
+    const fileAfterD1 = fs.readFileSync(CFG)
+    const d2 = await call("disable", { id: "windows-shell" })
+    ok("N10 重复 disable 是空操作（文件不动）", d2.text.includes("已经是停用状态") && fs.readFileSync(CFG).equals(fileAfterD1), d2.text)
+    const e1 = await call("enable", { id: "windows-shell" })
+    ok("N10 第一次 enable 逐字节复原", fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")), e1.text)
+    const e2 = await call("enable", { id: "windows-shell" })
+    ok("N10 重复 enable 是空操作", fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")) && e2.text.includes("无需修改"), e2.text)
+    ok("N10 sidecar 逐字节复原", fs.readFileSync(sideFile).equals(sideBefore), fs.readFileSync(sideFile, "utf8"))
+    ok("N10 前置：四步里的写操作都成功", d1.text.includes("✅") && e1.text.includes("✅"), `${d1.text}\n---\n${e1.text}`)
+  }
+
+  // N8 配置极端形状里的一条：目标文档语法坏了 → enable 既不猜也不崩，并明确说"无法解析"
+  {
+    cfgsWrite('{\n  "permissions": [\n    { "action": "skill", "resource": "windows-shell", "effect": "deny" }\n  \n}\n')
+    const before = fs.readFileSync(CFG)
+    const r = await call("enable", { id: "windows-shell" })
+    ok("N8 目标文件语法错误：enable 不崩、不报成功", !r.text.includes("❌ skill_management 执行失败") && !r.text.includes("✅"), r.text)
+    ok("N8 目标文件语法错误：明确提示无法解析", r.text.includes("无法解析"), r.text)
+    ok("N8 目标文件语法错误：文件未被改动", fs.readFileSync(CFG).equals(before))
+    cfgsWrite(ORIGINAL)
+  }
+
+  // §3.1/§4.4 一致性：sidecar 有记录但配置里已无对应规则 → 必须告警，且该 skill 显示为可用
+  {    cfgsWrite(ORIGINAL)
     mod.saveSidecar(tmpConfigDir, {
       rules: [{ id: "windows-shell", effect: "deny", file: CFG, insertedAt: new Date().toISOString(), createdBlock: true }],
     })
@@ -815,6 +1063,133 @@ section("G §11 变更（enable 放宽 · 备份 1 份 + 原子写 · descriptio
 
   cfgsWrite(ORIGINAL)
   mod.saveSidecar(tmpConfigDir, { rules: [] })
+}
+
+// ─────────────────────────────────────────────────────────────
+// H. 性能闸门（软阈值）
+// ─────────────────────────────────────────────────────────────
+section("H 性能闸门（软阈值，防回退）")
+{
+  const perfSkills = Array.from({ length: 29 }, (_, i) => ({
+    id: `perf-skill-${i}`,
+    name: `perf-skill-${i}`,
+    description: `perf fixture ${i}`,
+    path: path.join(REAL_HOME, ".claude", "skills", `perf-skill-${i}`, "SKILL.md"),
+  }))
+  // 12 agents × 10 rules：与 §2 假设的规模一致（规则数线性放大，这里是量级验证）
+  const perfAgents = Array.from({ length: 12 }, (_, i) => ({
+    id: `agent-${i}`,
+    hidden: i % 4 === 0,
+    permissions: Array.from({ length: 10 }, (_, j) => ({
+      action: j % 3 === 0 ? "*" : "skill",
+      resource: j % 3 === 0 ? "*" : j % 5 === 0 ? "perf-skill-*" : `perf-skill-${j}`,
+      effect: j % 4 === 0 ? "deny" : "allow",
+    })),
+  }))
+
+  const ctx = makeCtx({ skills: perfSkills, agents: perfAgents })
+  await mod.default.setup(ctx)
+  const tool = ctx.__tools.find((t) => t.name === "skill_management")
+  const runs = []
+  let first = null
+  for (let i = 0; i < 5; i++) {
+    const t0 = process.hrtime.bigint()
+    const res = await tool.execute({ action: "list" }, { agent: "agent-1" })
+    runs.push(Number(process.hrtime.bigint() - t0) / 1e6)
+    if (i === 0) first = res.content
+  }
+  ok("N12 合成注册表下 list 正常返回", first.includes("perf-skill-0") && !first.includes("❌"), first.slice(0, 300))
+  ok("N12 list 覆盖全部 29 个合成 skill", (first.match(/\| perf-skill-\d+ \|/g) ?? []).length === 29, String((first.match(/\| perf-skill-\d+ \|/g) ?? []).length))
+  const best = Math.min(...runs)
+  // 实测基线约 3.5–4 ms（改造前 5.96 ms）；阈值放到 25 ms，避免 CI 抖动误报。
+  ok(
+    "N12 list 最少耗时 < 25 ms（29 skills × 12 agents × 10 rules）",
+    best < 25,
+    `${best.toFixed(2)} ms（各次：${runs.map((r) => r.toFixed(2)).join(", ")}）`,
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// I. 发布闸门：打包内容 / exports 可解析 / 安装副本逐字节一致
+// ─────────────────────────────────────────────────────────────
+section("I 发布闸门（打包 / exports / 安装副本）")
+{
+  const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"))
+
+  // N13-1：npm pack --dry-run 的实际内容
+  let pack = null
+  try {
+    const out = execSync("npm pack --dry-run --json", {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 180000,
+    })
+    pack = JSON.parse(out)[0]
+  } catch (err) {
+    ok("N13 npm pack --dry-run 可执行", false, String((err && err.message) || err))
+  }
+  if (pack) {
+    const names = (pack.files ?? []).map((f) => f.path).sort()
+    ok("N13 打包含入口文件 src/skill_management.js", names.includes("src/skill_management.js"), names.join(", "))
+    ok(
+      "N13 打包内容只含 package.json / README / LICENSE / CHANGELOG / src/**",
+      names.every((n) => ["package.json", "README.md", "LICENSE", "CHANGELOG.md"].includes(n) || n.startsWith("src/")),
+      names.join(", "),
+    )
+    ok("N13 打包不含仓库内工具 / 文档 / agent 说明", !names.some((n) => n.startsWith("tools/") || n.startsWith("docs/") || n === "AGENTS.md" || n.startsWith(".github/")), names.join(", "))
+  }
+
+  // N13-2：exports 能按包名解析（Node 的 self-reference），且入口注册的工具给出四个动作
+  ok(
+    "N13 exports['.'] 指向存在的入口文件",
+    typeof pkg.exports?.["."] === "string" && fs.existsSync(path.join(repoRoot, pkg.exports["."])),
+    JSON.stringify(pkg.exports),
+  )
+  let entry = null
+  try {
+    entry = await import(pkg.name)
+  } catch (err) {
+    ok("N13 入口可按包名（self-reference）解析", false, String((err && err.message) || err))
+  }
+  if (entry) {
+    ok("N13 入口可按包名（self-reference）解析", typeof entry.default?.setup === "function")
+    const c = makeCtx()
+    await entry.default.setup(c)
+    const t = c.__tools.find((x) => x.name === "skill_management")
+    const actions = (t?.input?.properties?.action?.oneOf ?? []).map((o) => o.const).sort()
+    ok("N13 解析出的入口注册了四个动作", JSON.stringify(actions) === JSON.stringify(["disable", "enable", "inspect", "list"]), JSON.stringify(actions))
+  }
+
+  // N14：install.mjs 装出来的副本与 src 逐字节一致（防"手改安装副本"与"源不一致"）
+  // 落点用临时 XDG_CONFIG_HOME，绝不碰真实 <config>。
+  const installRoot = path.join(tmpRoot, "installcfg")
+  const installed = path.join(installRoot, "opencode", "plugins", "skill_management.js")
+  let ran = false
+  try {
+    execFileSync(process.execPath, [path.join(repoRoot, "tools", "install.mjs")], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, XDG_CONFIG_HOME: installRoot },
+      timeout: 60000,
+    })
+    ran = true
+  } catch (err) {
+    ok("N14 install.mjs 可执行", false, String((err && err.message) || err))
+  }
+  if (ran) {
+    ok("N14 install.mjs 落在临时 <config> 下（没写真实配置）", installed.startsWith(tmpRoot), installed)
+    ok("N14 安装副本与 src 逐字节一致", fs.existsSync(installed) && fs.readFileSync(installed).equals(fs.readFileSync(srcFile)))
+    const run2 = execFileSync(process.execPath, [path.join(repoRoot, "tools", "install.mjs")], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, XDG_CONFIG_HOME: installRoot },
+      timeout: 60000,
+    })
+    ok("N14 重复安装是幂等的（内容相同即跳过）", /已是最新/.test(run2) && fs.readFileSync(installed).equals(fs.readFileSync(srcFile)), run2)
+  }
 }
 
 console.log(`\n${"─".repeat(60)}`)

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Linux / WSL 上的真实验收：逻辑层（tools/verify.mjs）+ 宿主加载。
 #
-# 这个脚本存在的原因是四个已实测的环境坑（见 docs/preflight.md「环境坑」）：
+# 这个脚本存在的原因是五个已实测的环境坑（见 docs/preflight.md「环境坑」）：
 #   1) /tmp 在 wsl.exe 两次调用之间会丢 —— 所以根目录放 $HOME 下，不碰 /tmp
 #   2) WSL 的 PATH 里有 /mnt/c/.../npm 的 Windows v1 —— 所以一律用绝对路径调 Linux 版二进制
 #   3) Debian 13.5 minimal 没有 xz —— 所以 Node 用 .tar.gz
 #   4) `opencode run` 会读 stdin —— 所以每次调用都 </dev/null，否则管道里剩下的脚本会被当成用户输入
+#   5) `opencode --version` 也会在 $HOME 下建目录 —— 所以 HOME/XDG 必须在第一次调用前就切到临时目录
 #
 # 用法：
 #   bash tools/linux-verify.sh                 # 逻辑层 + 宿主加载
@@ -47,6 +48,17 @@ cleanup() {
   rm -rf "$ROOT"
 }
 trap cleanup EXIT
+
+# 隔离必须从**第一次调用 opencode 之前**开始：`opencode --version` 也会在 $HOME 下
+# 初始化 ~/.config/opencode 与 ~/.local/share/opencode。之前在第 4 步才切 HOME，
+# 于是在干净的机器上第 5 步必然报「真实配置目录被改动了」（实测：目录就是被 --version 建的）。
+# REAL_CFG / REAL_DATA 的快照已在上面按真实 HOME 拍好，这里之后一律用临时 HOME。
+export HOME="$ROOT/home"
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_DATA_HOME="$HOME/.local/share"
+export XDG_CACHE_HOME="$HOME/.cache"
+export XDG_STATE_HOME="$HOME/.local/state"
+mkdir -p "$XDG_CONFIG_HOME/opencode/plugins"
 
 say "0) 环境"
 printf 'repo    %s\n' "$REPO"
@@ -90,12 +102,6 @@ rm -rf "$ROOT/repo/.git"
 ( cd "$ROOT/repo" && node tools/verify.mjs 2>&1 | tail -3 )
 
 say "4) 宿主加载（临时 HOME + XDG，全在 $ROOT 下）"
-export HOME="$ROOT/home"
-export XDG_CONFIG_HOME="$HOME/.config"
-export XDG_DATA_HOME="$HOME/.local/share"
-export XDG_CACHE_HOME="$HOME/.cache"
-export XDG_STATE_HOME="$HOME/.local/state"
-mkdir -p "$XDG_CONFIG_HOME/opencode/plugins"
 cp "$ROOT/repo/src/skill_management.js" "$XDG_CONFIG_HOME/opencode/plugins/"
 "$OC" debug paths | sed 's/^/  /'
 
