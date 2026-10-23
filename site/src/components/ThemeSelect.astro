@@ -1,0 +1,127 @@
+---
+const labels = {
+  dark: Astro.locals.t('themeSelect.dark'),
+  light: Astro.locals.t('themeSelect.light'),
+  auto: Astro.locals.t('themeSelect.auto'),
+}
+---
+
+<div class="oc-menu" data-oc-menu data-oc-theme-menu>
+  <button
+    type="button"
+    class="oc-menu-trigger"
+    aria-haspopup="listbox"
+    aria-expanded="false"
+    aria-label={Astro.locals.t('themeSelect.accessibleLabel')}
+  >
+    <svg class="oc-menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 3v2m0 14v2M3 12h2m14 0h2M5.64 5.64l1.42 1.42m9.88 9.88 1.42 1.42M5.64 18.36l1.42-1.42m9.88-9.88 1.42-1.42"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+      />
+      <circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.6" />
+    </svg>
+    <span data-oc-theme-label>{labels.auto}</span>
+    <svg class="oc-menu-caret" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" />
+    </svg>
+  </button>
+  <ul class="oc-menu-list" role="listbox" aria-label={Astro.locals.t('themeSelect.accessibleLabel')}>
+    <li><button type="button" role="option" data-oc-theme-value="dark" aria-selected="false">{labels.dark}</button></li>
+    <li><button type="button" role="option" data-oc-theme-value="light" aria-selected="false">{labels.light}</button></li>
+    <li><button type="button" role="option" data-oc-theme-value="auto" aria-selected="false">{labels.auto}</button></li>
+  </ul>
+</div>
+
+<script>
+  type Theme = 'auto' | 'dark' | 'light'
+
+  const storageKey = 'starlight-theme'
+
+  const parseTheme = (value: unknown): Theme =>
+    value === 'auto' || value === 'dark' || value === 'light' ? value : 'auto'
+
+  const loadTheme = (): Theme =>
+    parseTheme(typeof localStorage !== 'undefined' ? localStorage.getItem(storageKey) : null)
+
+  const storeTheme = (theme: Theme): void => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(storageKey, theme === 'light' || theme === 'dark' ? theme : '')
+    }
+  }
+
+  const preferredTheme = (): Theme =>
+    matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+
+  const updateMenus = (theme: Theme): void => {
+    document.querySelectorAll<HTMLElement>('[data-oc-theme-menu]').forEach((menu) => {
+      menu.querySelectorAll<HTMLElement>('[data-oc-theme-value]').forEach((option) => {
+        option.setAttribute('aria-selected', String(option.dataset.ocThemeValue === theme))
+      })
+      const label = menu.querySelector<HTMLElement>('[data-oc-theme-label]')
+      if (label) {
+        const active = menu.querySelector<HTMLElement>(`[data-oc-theme-value="${theme}"]`)
+        label.textContent = active?.textContent?.trim() ?? theme
+      }
+    })
+  }
+
+  const applyTheme = (theme: Theme): void => {
+    document.documentElement.dataset.theme = theme === 'auto' ? preferredTheme() : theme
+    storeTheme(theme)
+    updateMenus(theme)
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-oc-theme-menu]').forEach((menu) => {
+    menu.querySelectorAll<HTMLElement>('[data-oc-theme-value]').forEach((option) => {
+      option.addEventListener('click', () => {
+        applyTheme(parseTheme(option.dataset.ocThemeValue))
+        menu.removeAttribute('data-open')
+        menu.querySelector<HTMLElement>('.oc-menu-trigger')?.setAttribute('aria-expanded', 'false')
+      })
+    })
+  })
+
+  // Shared open/close behaviour for the theme and language menus.
+  document.querySelectorAll<HTMLElement>('[data-oc-menu]').forEach((menu) => {
+    const trigger = menu.querySelector<HTMLElement>('.oc-menu-trigger')
+    if (!trigger) return
+    trigger.addEventListener('click', () => {
+      const willOpen = !menu.hasAttribute('data-open')
+      document.querySelectorAll<HTMLElement>('[data-oc-menu]').forEach((other) => {
+        other.removeAttribute('data-open')
+        other.querySelector<HTMLElement>('.oc-menu-trigger')?.setAttribute('aria-expanded', 'false')
+      })
+      if (willOpen) {
+        menu.setAttribute('data-open', '')
+        trigger.setAttribute('aria-expanded', 'true')
+      }
+    })
+  })
+
+  document.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element) || !event.target.closest('[data-oc-menu]')) {
+      document.querySelectorAll<HTMLElement>('[data-oc-menu]').forEach((menu) => {
+        menu.removeAttribute('data-open')
+        menu.querySelector<HTMLElement>('.oc-menu-trigger')?.setAttribute('aria-expanded', 'false')
+      })
+    }
+  })
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return
+    document.querySelectorAll<HTMLElement>('[data-oc-menu]').forEach((menu) => {
+      menu.removeAttribute('data-open')
+      menu.querySelector<HTMLElement>('.oc-menu-trigger')?.setAttribute('aria-expanded', 'false')
+    })
+  })
+
+  matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+    if (loadTheme() === 'auto') applyTheme('auto')
+  })
+
+  updateMenus(loadTheme())
+</script>

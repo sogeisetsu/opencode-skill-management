@@ -132,18 +132,86 @@ header.header {
   background: var(--oc-bg);
 }
 
-/* Keep the native theme/language menus legible and consistent across
-   browsers; the hover/selected row uses the fixed orange accent. */
-select option {
-  background-color: #1b1b1b;
-  color: #f2efef;
+/* Custom theme/language menus. Native <select> popups paint their own hover
+   row on Edge/Windows, so these replace them with controllable lists. */
+.oc-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
 }
 
-select option:hover,
-select option:focus,
-select option:checked {
-  background-color: #ff6700 !important;
-  color: #ffffff !important;
+.oc-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 2.75rem;
+  padding: 0 0.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--sl-color-gray-2);
+  font-family: var(--sl-font);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.oc-menu-trigger:hover,
+.oc-menu[data-open] .oc-menu-trigger {
+  color: var(--oc-text-strong);
+}
+
+.oc-menu-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.oc-menu-caret {
+  width: 0.85rem;
+  height: 0.85rem;
+  opacity: 0.7;
+}
+
+.oc-menu-list {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  inset-inline-end: 0;
+  z-index: 100;
+  display: none;
+  min-width: 9rem;
+  margin: 0;
+  padding: 0.3rem;
+  list-style: none;
+  background: var(--oc-bg-weak);
+  border: 1px solid var(--oc-border-strong);
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.28);
+}
+
+.oc-menu[data-open] .oc-menu-list {
+  display: block;
+}
+
+.oc-menu-list button,
+.oc-menu-list a {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--oc-text);
+  font-family: var(--sl-font);
+  font-size: 0.82rem;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.oc-menu-list button:hover,
+.oc-menu-list a:hover,
+.oc-menu-list button[aria-selected='true'],
+.oc-menu-list a[aria-current='page'] {
+  background: #ff6700;
+  color: #ffffff;
 }
 
 .sidebar-pane {
@@ -347,7 +415,7 @@ code {
 .hero h1 {
   font-family: var(--sl-font-mono);
   font-size: clamp(2.5rem, 7vw, 4.6rem) !important;
-  line-height: 1.02;
+  line-height: 1.16;
   letter-spacing: -0.045em;
   font-weight: 500;
   max-width: 100%;
@@ -515,8 +583,10 @@ code {
 .oc-card {
   display: flex;
   flex-direction: column;
-  height: 100%;
   min-height: 9.5rem;
+  /* Starlight's prose rhythm adds a top margin to adjacent blocks; inside a
+     grid that pushes every card after the first one down. */
+  margin: 0 !important;
   background: var(--oc-bg-weak);
   border: 1px solid var(--oc-border);
   border-radius: 6px;
@@ -661,6 +731,16 @@ code {
 }
 
 @media (max-width: 50rem) {
+  /* Compact the header controls on phones: icon + caret, no text label. */
+  header.header .oc-menu-trigger span {
+    display: none;
+  }
+
+  header.header .oc-menu-trigger {
+    gap: 0.2rem;
+    padding-inline: 0.3rem;
+  }
+
   .oc-line {
     grid-template-columns: 4.6rem 1fr;
   }

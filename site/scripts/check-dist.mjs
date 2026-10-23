@@ -104,7 +104,9 @@ for (const route of en) {
   const rel = route === '/' ? 'index.html' : `${route.slice(1)}index.html`
   const html = read(rel)
   const zhTarget = route === '/' ? `${BASE}/zh-cn/` : `${BASE}/zh-cn${route}`
-  if (!html.includes(`value="${zhTarget}"`)) problems.push(`${rel}: switcher does not offer ${zhTarget}`)
+  if (!html.includes(`value="${zhTarget}"`) && !html.includes(`href="${zhTarget}"`)) {
+    problems.push(`${rel}: switcher does not offer ${zhTarget}`)
+  }
 }
 
 if (problems.length > 0) {

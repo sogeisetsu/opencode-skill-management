@@ -1,0 +1,56 @@
+---
+import config from 'virtual:starlight/user-config'
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+const locales = config.locales ?? {}
+const routeLocale = Astro.locals.starlightRoute.locale
+const current = routeLocale && routeLocale in locales ? routeLocale : 'root'
+const currentLabel = locales[current]?.label ?? ''
+
+function localizedPathname(code: string): string {
+  let path = Astro.url.pathname
+  if (path.startsWith(base)) path = path.slice(base.length)
+  const segments = path.split('/').filter(Boolean)
+  if (segments[0] && segments[0] in locales) segments.shift()
+  const rest = segments.join('/')
+  const prefix = code === 'root' ? '' : `${code}/`
+  return `${base}/${prefix}${rest}${rest ? '/' : ''}`
+}
+---
+
+{
+  config.isMultilingual && (
+    <div class="oc-menu" data-oc-menu data-oc-lang-menu>
+      <button
+        type="button"
+        class="oc-menu-trigger"
+        aria-haspopup="listbox"
+        aria-expanded="false"
+        aria-label={Astro.locals.t('languageSelect.accessibleLabel')}
+      >
+        <svg class="oc-menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6" />
+          <path
+            d="M3 12h18M12 3c2.5 2.6 3.8 5.8 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.8-3.8-9S9.5 5.6 12 3Z"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+          />
+        </svg>
+        <span>{currentLabel}</span>
+        <svg class="oc-menu-caret" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" />
+        </svg>
+      </button>
+      <ul class="oc-menu-list" aria-label={Astro.locals.t('languageSelect.accessibleLabel')}>
+        {Object.entries(locales).map(([code, locale]) => (
+          <li>
+            <a href={localizedPathname(code)} aria-current={code === current ? 'page' : undefined}>
+              {locale?.label}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
