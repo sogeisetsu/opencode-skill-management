@@ -1,0 +1,88 @@
+---
+title: enable
+description: 删除挡路的那一条精确全局规则 —— 无法唯一定位时拒绝，并说明原因。
+---
+
+`enable` 从全局配置里删除挡路的规则。它**不**新增 `allow`：精确的 `deny`/`ask` 条目消失后，
+skill 回到正常求值（如果再无规则命中，就是宿主的 `ask` 回退）。
+
+规则不必是本工具写的，但必须能被唯一定位。
+
+## 参数
+
+| 名称 | 类型 | 必填 | 含义 |
+|---|---|---|---|
+| `action` | `"enable"` | 是 | 选择动作。 |
+| `id` | string | `id` / `name` 二选一 | 要恢复的 skill。 |
+| `name` | string | `id` / `name` 二选一 | 别名，仅在唯一命中时使用。 |
+| `dryRun` | boolean | 否 | 默认 `false`；`true` 只显示会删什么，不落盘。 |
+
+```text
+skill_management({ action: "enable", id: "windows-shell" })
+skill_management({ action: "enable", id: "windows-shell", dryRun: true })
+```
+
+## 哪些规则算候选
+
+同时满足：
+
+- `resource` **精确等于**该 skill id；
+- `effect` 为 `deny` 或 `ask`；
+- `action` 经 glob 匹配 `skill`。
+
+`allow` 不是挡路的规则，永远不会被删。通配 resource、agent 级 `permissions` 与 policies
+也不是候选，只报告。
+
+## 归属判定
+
+1. **行尾标记注释。** 以 `// skill_management` 结尾的规则可以自证来源，即使 sidecar 丢失也认。
+   这是正常路径。
+2. **sidecar 记录，没有标记。** `<config>/skill_management.state.json` 里有该 id 的记录，且配置里
+   恰好一条完全相同的规则时，删除并警告标记已被剥离。
+3. **两者都没有。** 拒绝执行，贴出配置里该规则的原文，文件保持原样。不会在多条相似规则里猜。
+
+配置无法解析时同样拒绝：在语法错误的 JSONC 里定位并安全删除规则是不可能的。
+
+## 它帮不上的情况
+
+调用者确实被挡，但配置里没有该 id 的精确规则时，`enable` 会说明「挡路的不是这一行」：
+
+- 通配或更宽的 `skill` 规则；
+- `agents.<id>.permissions` 里的 agent 级规则；
+- `policies` / `experimental.policies`（插件的上下文没有 `config` 域，读不到）。
+
+这些情况只报告命中的规则，不代改。请手工处理。
+
+## 执行顺序
+
+1. 解析 skill 与调用者当前效果。
+2. 读取目标配置，以及 sidecar 记录过的文件。
+3. 定位候选精确规则，按上面的优先级选出唯一一条。
+4. 删除该项；如果这次编辑让 `permissions` 块变空，一并清理。
+5. 原子写入，保留缩进、键顺序、行尾与 BOM；保留一份备份。
+6. 重载并轮询，直到调用者的精确规则条数减少，或超时
+   （`SKILL_MGMT_VERIFY_TIMEOUT_MS`，默认 6 秒）。超时则恢复原字节。
+7. 报告规则来源，以及**删除后**调用者的实际生效效果。如果仍被更宽的规则压成 deny，
+   输出会明说，而不是暗示成功。
+
+## 怎么读结果
+
+成功时会写明文件、是否清理了空的 `permissions` 块、被删规则的来源（标记 / sidecar），
+以及删除后的效果。`dryRun` 以 `dryRun：未写入任何文件。` 结尾。
+
+常见结果：
+
+| 情况 | 结果 |
+|---|---|
+| 本工具写入、标记完整 | 删除；来源 = 行尾标记。 |
+| 标记被剥离，sidecar 恰好一条 | 删除并警告核对配置。 |
+| 同一 id 有两条相同规则 | 拒绝；打印候选。 |
+| 被 `resource: "*"` 挡住 | 拒绝；打印宽规则。 |
+| 只在某个 agent 自己的规则里被挡 | 拒绝；打印 agent 级规则。 |
+| 没有规则，也没被挡 | 报告无需修改。 |
+
+## 写不写配置？
+
+写，除非 `dryRun: true`，并且只在找到唯一精确规则时写。拒绝执行时零写入。
+
+下一步：读[权限规则与求值模型](../../permissions/)，理解规则删掉之后会发生什么。

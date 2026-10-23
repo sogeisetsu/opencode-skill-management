@@ -1,0 +1,544 @@
+/*
+ * Visual language: a restrained, terminal-adjacent dark UI.
+ * Palette and type are a human comparison against opencode.ai (near-black
+ * surfaces, neutral grays, a pale-yellow interactive accent, monospace
+ * headings and commands). It is not a pixel-level copy.
+ */
+
+:root,
+:root[data-theme='dark'] {
+  --oc-bg: #111111;
+  --oc-bg-weak: #171717;
+  --oc-bg-raised: #1b1b1b;
+  --oc-border: #2e2d2d;
+  --oc-border-strong: #454343;
+  --oc-text: #b8b6b6;
+  --oc-text-strong: #f2efef;
+  --oc-text-weak: #8e8b8b;
+  --oc-accent: #e9e6ab;
+  --oc-accent-soft: #fbf9cf;
+  --oc-btn-bg: #f2efef;
+  --oc-btn-fg: #111111;
+  --oc-accent-ink: #111111;
+
+  --sl-color-bg: var(--oc-bg);
+  --sl-color-bg-nav: var(--oc-bg);
+  --sl-color-bg-sidebar: var(--oc-bg);
+  --sl-color-bg-inline-code: var(--oc-bg-raised);
+  --sl-color-bg-accent: var(--oc-text-strong);
+  --sl-color-text: var(--oc-text);
+  --sl-color-text-accent: var(--oc-text-strong);
+  --sl-color-text-invert: #111111;
+  --sl-color-hairline: var(--oc-border);
+  --sl-color-hairline-light: var(--oc-border-strong);
+  --sl-color-hairline-shade: #232323;
+  --sl-color-accent-low: #2b2a16;
+  --sl-color-accent: var(--oc-accent);
+  --sl-color-accent-high: var(--oc-accent-soft);
+  --sl-color-white: var(--oc-text-strong);
+  --sl-color-black: #0c0c0c;
+  --sl-color-gray-1: #f2efef;
+  --sl-color-gray-2: #dad8d8;
+  --sl-color-gray-3: #bcbaba;
+  --sl-color-gray-4: #8e8b8b;
+  --sl-color-gray-5: #6a6868;
+  --sl-color-gray-6: #2e2d2d;
+  --sl-color-gray-7: #1b1b1b;
+
+  --sl-font:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  --sl-font-mono:
+    'Berkeley Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo,
+    Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+
+:root[data-theme='light'] {
+  --oc-bg: #fbfaf9;
+  --oc-bg-weak: #f4f2f0;
+  --oc-bg-raised: #f0eeeb;
+  --oc-border: #d9d6d2;
+  --oc-border-strong: #bcb8b3;
+  --oc-text: #3f3d3b;
+  --oc-text-strong: #141312;
+  --oc-text-weak: #6f6b67;
+  --oc-accent: #5b5900;
+  --oc-accent-soft: #f1edb8;
+  --oc-btn-bg: #141312;
+  --oc-btn-fg: #fbfaf9;
+  --oc-accent-ink: #fbfaf9;
+
+  --sl-color-bg: var(--oc-bg);
+  --sl-color-bg-nav: var(--oc-bg);
+  --sl-color-bg-sidebar: var(--oc-bg);
+  --sl-color-bg-inline-code: var(--oc-bg-raised);
+  --sl-color-text: var(--oc-text);
+  --sl-color-text-accent: var(--oc-text-strong);
+  --sl-color-text-invert: #fbfaf9;
+  --sl-color-hairline: var(--oc-border);
+  --sl-color-hairline-light: var(--oc-border-strong);
+  --sl-color-accent-low: #efecb0;
+  --sl-color-accent: #565400;
+  --sl-color-accent-high: #333200;
+  --sl-color-white: #141312;
+  --sl-color-black: #fbfaf9;
+  --sl-color-gray-1: #141312;
+  --sl-color-gray-2: #3f3d3b;
+  --sl-color-gray-3: #6f6b67;
+  --sl-color-gray-4: #8e8b8b;
+  --sl-color-gray-5: #bcb8b3;
+  --sl-color-gray-6: #d9d6d2;
+  --sl-color-gray-7: #efedeb;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-feature-settings: 'ss01', 'cv01';
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--oc-accent);
+  color: #111111;
+}
+
+/* ── chrome ───────────────────────────────────────────────────────────── */
+
+.site-title {
+  font-family: var(--sl-font-mono);
+  font-size: 0.86rem !important;
+  letter-spacing: -0.01em;
+}
+
+header.header {
+  border-bottom: 1px solid var(--oc-border);
+  background: var(--oc-bg);
+}
+
+.sidebar-pane {
+  border-inline-end: 1px solid var(--oc-border);
+}
+
+.sidebar-content .group-label span,
+.sidebar-content summary .group-label span {
+  font-family: var(--sl-font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--oc-text-weak);
+}
+
+.sidebar-content a {
+  font-size: 0.86rem;
+}
+
+.sidebar-content a[aria-current='page'] {
+  background: var(--oc-bg-raised);
+  color: var(--oc-text-strong);
+  box-shadow: inset 2px 0 0 var(--oc-accent);
+}
+
+.right-sidebar {
+  border-inline-start: 1px solid var(--oc-border);
+}
+
+.right-sidebar a {
+  font-size: 0.78rem;
+}
+
+/* ── typography ───────────────────────────────────────────────────────── */
+
+h1,
+h2,
+h3,
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3 {
+  font-family: var(--sl-font-mono);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  color: var(--oc-text-strong);
+}
+
+h1 {
+  font-size: clamp(1.9rem, 4vw, 2.4rem);
+  line-height: 1.15;
+}
+
+h2 {
+  font-size: 1.28rem;
+  margin-top: 2.6rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--oc-border);
+}
+
+h3 {
+  font-size: 1rem;
+}
+
+.sl-markdown-content {
+  font-size: 0.95rem;
+  line-height: 1.75;
+}
+
+.sl-markdown-content a:not(.sl-link-button) {
+  color: var(--oc-text-strong);
+  text-decoration-color: var(--oc-border-strong);
+  text-underline-offset: 0.22em;
+}
+
+.sl-markdown-content a:not(.sl-link-button):hover {
+  color: var(--oc-accent);
+  text-decoration-color: var(--oc-accent);
+}
+
+.sl-markdown-content strong {
+  color: var(--oc-text-strong);
+  font-weight: 600;
+}
+
+blockquote {
+  border-inline-start: 2px solid var(--oc-accent) !important;
+  background: var(--oc-bg-weak);
+  color: var(--oc-text);
+}
+
+/* ── code ─────────────────────────────────────────────────────────────── */
+
+code {
+  font-family: var(--sl-font-mono);
+  font-size: 0.84em;
+}
+
+.sl-markdown-content :not(pre) > code {
+  border: 1px solid var(--oc-border);
+  border-radius: 4px;
+  padding: 0.1em 0.32em;
+  background: var(--oc-bg-raised);
+  color: var(--oc-text-strong);
+}
+
+.expressive-code {
+  --ec-bg: #0d0d0d;
+  --ec-bg-fallback: #0d0d0d;
+}
+
+:root[data-theme='light'] .expressive-code {
+  --ec-bg: #f7f6f4;
+  --ec-bg-fallback: #f7f6f4;
+}
+
+.expressive-code .frame {
+  border: 1px solid var(--oc-border) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+
+.expressive-code .frame pre {
+  font-size: 0.82rem;
+}
+
+/* The generated copy control collapses to an empty dark square on some
+   renderers; selection/copy from the block remains available. */
+.expressive-code .copy {
+  display: none !important;
+}
+
+/* ── tables ───────────────────────────────────────────────────────────── */
+
+.sl-markdown-content table {
+  font-size: 0.85rem;
+}
+
+.sl-markdown-content th {
+  font-family: var(--sl-font-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--oc-text-weak);
+  background: var(--oc-bg-weak);
+  border-bottom: 1px solid var(--oc-border-strong);
+}
+
+.sl-markdown-content td,
+.sl-markdown-content th {
+  border-color: var(--oc-border);
+  padding: 0.55rem 0.7rem;
+}
+
+.sl-markdown-content td code {
+  white-space: nowrap;
+}
+
+/* ── splash / landing ─────────────────────────────────────────────────── */
+
+.hero {
+  padding-block: clamp(3rem, 9vw, 6rem) 0 !important;
+}
+
+.hero > .stack {
+  gap: 1.1rem;
+}
+
+.hero h1 {
+  font-size: clamp(2.5rem, 7vw, 4.6rem) !important;
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+  font-weight: 500;
+  max-width: 18ch;
+  margin-inline: auto;
+  text-wrap: balance;
+}
+
+.hero .tagline {
+  font-size: clamp(0.95rem, 1.6vw, 1.08rem);
+  line-height: 1.65;
+  color: var(--oc-text);
+  max-width: 44rem;
+  margin-inline: auto;
+}
+
+.hero .actions {
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+}
+
+.sl-link-button {
+  font-family: var(--sl-font-mono);
+  font-size: 0.8rem !important;
+  border-radius: 4px !important;
+  padding: 0.6rem 1.05rem !important;
+  letter-spacing: -0.01em;
+}
+
+.sl-link-button.primary {
+  background: var(--oc-btn-bg) !important;
+  border-color: var(--oc-btn-bg) !important;
+  color: var(--oc-btn-fg) !important;
+}
+
+.sl-link-button.primary:hover {
+  background: var(--oc-accent) !important;
+  border-color: var(--oc-accent) !important;
+  color: var(--oc-accent-ink) !important;
+}
+
+.sl-link-button.minimal {
+  color: var(--oc-text) !important;
+  border-color: var(--oc-border-strong) !important;
+}
+
+.sl-link-button.minimal:hover {
+  color: var(--oc-text-strong) !important;
+  border-color: var(--oc-text-strong) !important;
+}
+
+/* terminal window used on the landing page */
+
+.oc-terminal {
+  max-width: 46rem;
+  margin: 3rem auto 0;
+  border: 1px solid var(--oc-border-strong);
+  border-radius: 8px;
+  background: #0b0b0b;
+  overflow: hidden;
+  text-align: start;
+}
+
+.oc-terminal-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--oc-border);
+  background: #151515;
+}
+
+.oc-terminal-bar span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3b3a3a;
+}
+
+.oc-terminal-bar em {
+  margin-inline-start: auto;
+  font-family: var(--sl-font-mono);
+  font-style: normal;
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6a6868;
+}
+
+.oc-terminal pre {
+  margin: 0;
+  padding: 1rem 1.15rem 1.25rem;
+  background: transparent;
+  border: 0;
+  overflow-x: auto;
+  font-family: var(--sl-font-mono);
+  font-size: 0.78rem;
+  line-height: 1.8;
+  color: #cfcccc;
+}
+
+.oc-terminal .d {
+  color: #6f6c6c;
+}
+
+.oc-terminal .y {
+  color: var(--oc-accent);
+}
+
+.oc-terminal .w {
+  color: #f2efef;
+}
+
+/* landing sections */
+
+.oc-kicker {
+  font-family: var(--sl-font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--oc-text-weak);
+  margin: 0 0 0.6rem;
+}
+
+.oc-section {
+  max-width: 58rem;
+  margin: 5rem auto 0;
+  text-align: start;
+}
+
+.oc-section > h2 {
+  font-size: 1.5rem;
+  border: 0;
+  padding: 0;
+  margin: 0 0 0.9rem;
+}
+
+.oc-lede {
+  font-size: 1rem;
+  line-height: 1.7;
+  color: var(--oc-text);
+  max-width: 42rem;
+}
+
+.oc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1px;
+  margin-top: 1.8rem;
+  background: var(--oc-border);
+  border: 1px solid var(--oc-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.oc-card {
+  background: var(--oc-bg-weak);
+  padding: 1.15rem 1.2rem 1.25rem;
+}
+
+.oc-card h3 {
+  margin: 0 0 0.45rem;
+  font-size: 0.86rem;
+  color: var(--oc-text-strong);
+}
+
+.oc-card p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--oc-text-weak);
+}
+
+.oc-card code {
+  color: var(--oc-text);
+}
+
+.oc-lines {
+  margin-top: 1.6rem;
+  border-top: 1px solid var(--oc-border);
+}
+
+.oc-line {
+  display: grid;
+  grid-template-columns: 5.4rem 1fr;
+  gap: 1rem;
+  padding: 0.75rem 0.1rem;
+  border-bottom: 1px solid var(--oc-border);
+  font-size: 0.85rem;
+}
+
+.oc-line dt {
+  font-family: var(--sl-font-mono);
+  color: var(--oc-accent);
+}
+
+.oc-line dd {
+  margin: 0;
+  color: var(--oc-text);
+}
+
+.oc-end {
+  max-width: 58rem;
+  margin: 5rem auto 1rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--oc-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem 1.6rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.oc-end p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--oc-text-weak);
+  max-width: 34rem;
+}
+
+/* landing page: the command window is the only "decoration" */
+[data-has-hero] .expressive-code {
+  max-width: 46rem;
+  margin: 2.8rem auto 0;
+  text-align: start;
+}
+
+[data-has-hero] .expressive-code .frame {
+  border-color: var(--oc-border-strong) !important;
+}
+
+/* reduce the visual weight of Starlight's default splash content wrapper */
+[data-has-hero] .content-panel {
+  padding-inline: 0;
+}
+
+@media (max-width: 50rem) {
+  .oc-line {
+    grid-template-columns: 4.6rem 1fr;
+  }
+
+  .hero {
+    padding-block: 2.5rem 0 !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

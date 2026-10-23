@@ -28,9 +28,17 @@
   "bugs": {
     "url": "https://github.com/sogeisetsu/opencode-skill-management/issues"
   },
-  "homepage": "https://github.com/sogeisetsu/opencode-skill-management",
+  "homepage": "https://sogeisetsu.github.io/opencode-skill-management/",
   "scripts": {
     "verify": "node tools/verify.mjs",
-    "install:plugin": "node tools/install.mjs"
+    "install:plugin": "node tools/install.mjs",
+    "docs:dev": "astro dev --root site",
+    "docs:build": "astro build --root site",
+    "docs:check": "node site/scripts/check-dist.mjs",
+    "docs:preview": "astro preview --root site"
+  },
+  "devDependencies": {
+    "@astrojs/starlight": "^0.40.0",
+    "astro": "^6.4.8"
   }
 }

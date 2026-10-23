@@ -1,0 +1,124 @@
+---
+title: Skills, under control.
+description: List, inspect, disable and enable OpenCode skills without touching a single skill file.
+template: splash
+editUrl: false
+hero:
+  tagline: A native OpenCode V2 tool that makes skill permissions something you can read, change and reverse — one exact rule at a time.
+  actions:
+    - text: Get started
+      link: /opencode-skill-management/overview/
+      icon: right-arrow
+    - text: Install
+      link: /opencode-skill-management/installation/
+      variant: minimal
+---
+
+```text title="opencode v2"
+$ opencode plugin add github:sogeisetsu/opencode-skill-management
+✓ skill_management (single file, zero runtime dependencies)
+
+$ skill_management({ action: "list" })
+# skills (N)
+id             source  scope  state
+…              …       …      …
+
+$ skill_management({ action: "disable", id: "windows-shell" })
++ { "action": "skill", "resource": "windows-shell", "effect": "deny" } // skill_management
+✓ written, reloaded, read back — caller agent = deny
+```
+
+<div class="oc-section">
+  <p class="oc-kicker">The context tax</p>
+  <h2>Every installed skill is context you keep paying for.</h2>
+  <p class="oc-lede">
+    OpenCode injects skill names and descriptions into the model's context. Install enough of
+    them and the list stops being useful: stale entries crowd out the work, a skill that will
+    not load gives you no reason why, and deleting files to "turn one off" is a change you have
+    to remember how to undo.
+  </p>
+
+  <div class="oc-grid">
+    <div class="oc-card">
+      <h3>See the real state</h3>
+      <p>
+        <code>list</code> evaluates permissions for the agent that is actually calling, not a
+        merged view of every agent.
+      </p>
+    </div>
+    <div class="oc-card">
+      <h3>Disable without deleting</h3>
+      <p>
+        One rule in the global config hides a skill and rejects loading. The skill file is never
+        moved or edited.
+      </p>
+    </div>
+    <div class="oc-card">
+      <h3>Know why it is blocked</h3>
+      <p>
+        <code>inspect</code> quotes the rule that matched, shows per-agent differences and
+        explains where the id came from.
+      </p>
+    </div>
+    <div class="oc-card">
+      <h3>Reverse it precisely</h3>
+      <p>
+        <code>enable</code> deletes the one blocking rule — not a guess, and only when it can be
+        uniquely identified.
+      </p>
+    </div>
+  </div>
+</div>
+
+<div class="oc-section">
+  <p class="oc-kicker">Four actions</p>
+  <h2>A small, deliberate surface.</h2>
+  <dl class="oc-lines">
+    <div class="oc-line">
+      <dt>list</dt>
+      <dd>Every registered skill with its effective state for the caller, plus config and sidecar consistency notes. Read-only.</dd>
+    </div>
+    <div class="oc-line">
+      <dt>inspect</dt>
+      <dd>One skill in detail: conclusion, matched rule, per-agent table, id derivation. Read-only.</dd>
+    </div>
+    <div class="oc-line">
+      <dt>disable</dt>
+      <dd>Write one global <code>skill</code> permission rule. <code>deny</code> by default, <code>ask</code> for a soft disable, <code>dryRun</code> to preview.</dd>
+    </div>
+    <div class="oc-line">
+      <dt>enable</dt>
+      <dd>Delete the one exact global rule that blocks the skill. Refuses when the rule is ambiguous or out of scope.</dd>
+    </div>
+  </dl>
+</div>
+
+<div class="oc-section">
+  <p class="oc-kicker">The carrier</p>
+  <h2>One rule. Same file. No side effects.</h2>
+  <p class="oc-lede">
+    Disabling is not a special database or a rewritten skill file. It is a single entry appended
+    to the global <code>permissions</code> array, with a same-line marker so it can be found
+    again. Indentation, key order, line endings and BOM are preserved.
+  </p>
+
+```jsonc
+{
+  "permissions": [
+    { "action": "skill", "resource": "windows-shell", "effect": "deny" } // skill_management
+  ]
+}
+```
+
+  <p class="oc-lede" style="margin-top:1.4rem">
+    The same rule is what <code>enable</code> later removes. That is the whole state model.
+  </p>
+</div>
+
+<div class="oc-end">
+  <p>
+    OpenCode V2 · verified on 2.0.32 across Windows and Linux · Node 18+ · no third-party
+    runtime dependencies.
+  </p>
+  <a class="sl-link-button primary" href="/opencode-skill-management/overview/">Read the docs →</a>
+</div>
