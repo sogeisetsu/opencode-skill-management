@@ -10,3 +10,8 @@ tmp/
 
 # node (实现阶段可能用到)
 node_modules/
+
+# docs site build output
+site/dist/
+site/.astro/
+.astro/

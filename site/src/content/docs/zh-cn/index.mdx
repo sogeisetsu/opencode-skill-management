@@ -1,0 +1,114 @@
+---
+title: 把 skill 的开关拿回来。
+description: 列出、诊断、停用、恢复 OpenCode skill —— 不碰任何一个 skill 文件。
+template: splash
+editUrl: false
+hero:
+  tagline: 一个 OpenCode V2 原生工具，把 skill 权限变成能读懂、能修改、能撤回的东西 —— 一次只动一条精确规则。
+  actions:
+    - text: 开始使用
+      link: /opencode-skill-management/zh-cn/overview/
+      icon: right-arrow
+    - text: 安装
+      link: /opencode-skill-management/zh-cn/installation/
+      variant: minimal
+---
+
+```text title="opencode v2"
+$ opencode plugin add github:sogeisetsu/opencode-skill-management
+✓ skill_management（单文件，无运行时依赖）
+
+$ skill_management({ action: "list" })
+# skills (N)
+id             source  scope  state
+…              …       …      …
+
+$ skill_management({ action: "disable", id: "windows-shell" })
++ { "action": "skill", "resource": "windows-shell", "effect": "deny" } // skill_management
+✓ 已写入、重载并回读 —— 调用者 agent = deny
+```
+
+<div class="oc-section">
+  <p class="oc-kicker">上下文税</p>
+  <h2>每装一个 skill，都在持续占用上下文。</h2>
+  <p class="oc-lede">
+    OpenCode 会把 skill 的名称和描述注入模型上下文。装得多了，这份列表就不再是帮助：过时的条目挤占注意力，加载不了的 skill 不告诉你原因，而「删文件」这种停用方式，改回来还得凭记忆。
+  </p>
+
+  <div class="oc-grid">
+    <div class="oc-card">
+      <h3>看见真实状态</h3>
+      <p>
+        <code>list</code> 按实际发起调用的 agent 求值，而不是把所有 agent 的规则混在一起。
+      </p>
+    </div>
+    <div class="oc-card">
+      <h3>停用但不删除</h3>
+      <p>
+        全局配置里的一条规则就能让它从列表消失、加载被拒。skill 文件一个字节都不动。
+      </p>
+    </div>
+    <div class="oc-card">
+      <h3>知道为什么被挡</h3>
+      <p>
+        <code>inspect</code> 贴出命中的规则、逐 agent 的差异，以及 id 是怎么来的。
+      </p>
+    </div>
+    <div class="oc-card">
+      <h3>精确地撤回</h3>
+      <p>
+        <code>enable</code> 只删那一条挡路的规则 —— 定位不唯一就拒绝，不猜。
+      </p>
+    </div>
+  </div>
+</div>
+
+<div class="oc-section">
+  <p class="oc-kicker">四个动作</p>
+  <h2>表面积很小，语义很硬。</h2>
+  <dl class="oc-lines">
+    <div class="oc-line">
+      <dt>list</dt>
+      <dd>列出所有已注册 skill 对调用者的有效状态，附配置与 sidecar 的一致性提示。只读。</dd>
+    </div>
+    <div class="oc-line">
+      <dt>inspect</dt>
+      <dd>单个 skill 的详情：结论、命中规则、逐 agent 表、id 推导。只读。</dd>
+    </div>
+    <div class="oc-line">
+      <dt>disable</dt>
+      <dd>写一条全局 <code>skill</code> 权限规则。默认 <code>deny</code>，可用 <code>ask</code> 软停用，<code>dryRun</code> 预览。</dd>
+    </div>
+    <div class="oc-line">
+      <dt>enable</dt>
+      <dd>删掉挡路的那一条精确全局规则。规则有歧义或超出范围时拒绝执行。</dd>
+    </div>
+  </dl>
+</div>
+
+<div class="oc-section">
+  <p class="oc-kicker">载体</p>
+  <h2>一条规则，同一个文件，没有副作用。</h2>
+  <p class="oc-lede">
+    停用不是另建数据库，也不是改写 skill 文件。它就是全局 <code>permissions</code> 数组末尾的一条规则，行尾带一个来源标记，方便以后再找到它。缩进、键顺序、行尾风格与 BOM 都会保留。
+  </p>
+
+```jsonc
+{
+  "permissions": [
+    { "action": "skill", "resource": "windows-shell", "effect": "deny" } // skill_management
+  ]
+}
+```
+
+  <p class="oc-lede" style="margin-top:1.4rem">
+    之后 <code>enable</code> 删掉的也正是这一条。整个状态模型就这么大。
+  </p>
+</div>
+
+<div class="oc-end">
+  <p>
+    OpenCode V2 · 在 2.0.32 上完成 Windows / Linux 验收 · Node 18+ · 无第三方运行时依赖。
+  </p>
+  <a class="sl-link-button primary" href="/opencode-skill-management/zh-cn/overview/">阅读文档 →</a>
+</div>
