@@ -55,7 +55,10 @@ paths are literal, and the structure described in these pages is the stable part
 
 ## A first session
 
-```text
+These are **tool calls**, not shell commands: each line is the argument object passed to the
+native `skill_management` tool.
+
+```text title="tool calls"
 skill_management({ action: "list" })
 skill_management({ action: "inspect", id: "windows-shell" })
 skill_management({ action: "disable", id: "windows-shell", dryRun: true })

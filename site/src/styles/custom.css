@@ -22,6 +22,7 @@
   --oc-accent-ink: #111111;
   --oc-selection-bg: #e9e6ab;
   --oc-selection-fg: #111111;
+  --oc-interactive: #ff6700;
 
   --sl-color-bg: var(--oc-bg);
   --sl-color-bg-nav: var(--oc-bg);
@@ -71,6 +72,7 @@
   --oc-accent-ink: #fbfaf9;
   --oc-selection-bg: #f3efc2;
   --oc-selection-fg: #141312;
+  --oc-interactive: #ff6700;
 
   --sl-color-bg: var(--oc-bg);
   --sl-color-bg-nav: var(--oc-bg);
@@ -117,9 +119,31 @@ body {
   letter-spacing: -0.01em;
 }
 
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
 header.header {
   border-bottom: 1px solid var(--oc-border);
   background: var(--oc-bg);
+}
+
+/* Keep the native theme/language menus legible and consistent across
+   browsers; the hover/selected row uses the fixed orange accent. */
+select option {
+  background-color: #1b1b1b;
+  color: #f2efef;
+}
+
+select option:hover,
+select option:focus,
+select option:checked {
+  background-color: #ff6700 !important;
+  color: #ffffff !important;
 }
 
 .sidebar-pane {
@@ -161,9 +185,9 @@ h3,
 .sl-markdown-content h1,
 .sl-markdown-content h2,
 .sl-markdown-content h3 {
-  font-family: var(--sl-font-mono);
-  font-weight: 500;
-  letter-spacing: -0.025em;
+  font-family: var(--sl-font);
+  font-weight: 600;
+  letter-spacing: -0.02em;
   color: var(--oc-text-strong);
 }
 
@@ -321,6 +345,7 @@ code {
 }
 
 .hero h1 {
+  font-family: var(--sl-font-mono);
   font-size: clamp(2.5rem, 7vw, 4.6rem) !important;
   line-height: 1.02;
   letter-spacing: -0.045em;
@@ -361,9 +386,9 @@ code {
 }
 
 .sl-link-button.primary:hover {
-  background: var(--oc-accent) !important;
-  border-color: var(--oc-accent) !important;
-  color: var(--oc-accent-ink) !important;
+  background: var(--oc-interactive) !important;
+  border-color: var(--oc-interactive) !important;
+  color: #ffffff !important;
 }
 
 .sl-link-button.minimal {
@@ -372,8 +397,8 @@ code {
 }
 
 .sl-link-button.minimal:hover {
-  color: var(--oc-text-strong) !important;
-  border-color: var(--oc-text-strong) !important;
+  color: var(--oc-interactive) !important;
+  border-color: var(--oc-interactive) !important;
 }
 
 /* terminal window used on the landing page */
@@ -491,6 +516,7 @@ code {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 9.5rem;
   background: var(--oc-bg-weak);
   border: 1px solid var(--oc-border);
   border-radius: 6px;
@@ -536,6 +562,33 @@ code {
 .oc-line dd {
   margin: 0;
   color: var(--oc-text);
+}
+
+/* Rendered-output samples use a Starlight aside, restyled as a neutral panel
+   so the Markdown inside is still rendered but visually framed. */
+.sl-markdown-content .starlight-aside {
+  background: var(--oc-bg-weak);
+  border: 1px solid var(--oc-border);
+  border-inline-start: 1px solid var(--oc-border);
+  border-radius: 6px;
+  padding: 1rem 1.15rem;
+}
+
+.sl-markdown-content .starlight-aside__icon {
+  display: none;
+}
+
+.sl-markdown-content .starlight-aside__title {
+  font-family: var(--sl-font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--oc-text-weak);
+  margin-bottom: 0.65rem;
+}
+
+.sl-markdown-content .starlight-aside > :last-child {
+  margin-bottom: 0;
 }
 
 .oc-end {

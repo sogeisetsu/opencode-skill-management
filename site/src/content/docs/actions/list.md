@@ -64,6 +64,8 @@ State is computed per agent on purpose. Merging all agents' rules would leak a s
 
 The tool returns Markdown; this is the rendered form, with columns abridged.
 
+:::note[Rendered output]
+
 **skills (N)**
 
 | id | source | state | path |
@@ -82,6 +84,11 @@ The full table also has `name`, `autoinvoke`, `scope` and `description` columns.
 目标配置文件：`<config>\opencode.jsonc`
 
 - 目标文件含现有 permissions，直接在其数组中追加/删除
+
+:::
+
+`§3.6` is a section of the project's internal design spec; the behavior it refers to is
+documented in [Permissions & evaluation](../../permissions/).
 
 Use it before a bulk cleanup, and again after `disable` to confirm the state actually changed.
 

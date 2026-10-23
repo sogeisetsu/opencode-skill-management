@@ -50,7 +50,9 @@ OpenCode 把 skill 权限当作规则列表求值，后匹配者胜，支持 glo
 
 ## 第一次使用
 
-```text
+下面几行是**工具调用**，不是 shell 命令：每一行都是传给原生工具 `skill_management` 的参数对象。
+
+```text title="工具调用"
 skill_management({ action: "list" })
 skill_management({ action: "inspect", id: "windows-shell" })
 skill_management({ action: "disable", id: "windows-shell", dryRun: true })
