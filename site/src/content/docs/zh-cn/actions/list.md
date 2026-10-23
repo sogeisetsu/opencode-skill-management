@@ -58,6 +58,8 @@ skill_management({ action: "list" })
 
 工具返回的是 Markdown，下面是渲染后的形态（列有删减）。
 
+:::note[渲染后的输出]
+
 **skills (N)**
 
 | id | source | state | path |
@@ -76,6 +78,11 @@ skill_management({ action: "list" })
 目标配置文件：`<config>\opencode.jsonc`
 
 - 目标文件含现有 permissions，直接在其数组中追加/删除
+
+:::
+
+`§3.6` 指项目内部设计规范的对应小节；本站的说明见
+[权限规则与求值模型](../../permissions/)。
 
 批量清理前跑一次，`disable` 之后再跑一次，确认状态真的变了。
 

@@ -64,6 +64,8 @@ would not be the fix.
 The tool returns Markdown. This is the rendered form of an `inspect` result; the table headers
 are Chinese, as the tool emits them.
 
+:::note[Rendered output]
+
 **Metadata**
 
 | 字段 | 值 |
@@ -92,6 +94,8 @@ are Chinese, as the tool emits them.
 
 > **结论**：`windows-shell` 对调用者 agent `build` 当前**不可用** —— 权限效果为 deny（命中
 > `rules[3] = {...}`），模型可见列表会隐藏它、且 `skill` 工具加载会被拒。
+
+:::
 
 ## When to use it
 
