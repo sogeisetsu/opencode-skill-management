@@ -62,21 +62,26 @@ State is computed per agent on purpose. Merging all agents' rules would leak a s
 
 ## Abridged output
 
-```text
-# skills (N)
+The tool returns Markdown; this is the rendered form, with columns abridged.
 
-| id | name | autoinvoke | source | scope | state | path | description |
-|---|---|---|---|---|---|---|---|
-| windows-shell | windows-shell |  | config | user | available | <config>\skills\windows-shell\SKILL.md | Windows shell conventions… |
-| pdf-tools | pdf-tools |  | catalog | user | disabled | <cache>\skills\pdf-tools\SKILL.md | Read and extract PDF content… |
+**skills (N)**
+
+| id | source | state | path |
+|---|---|---|---|
+| windows-shell | config | available | `<config>\skills\windows-shell\SKILL.md` |
+| pdf-tools | catalog | disabled | `<cache>\skills\pdf-tools\SKILL.md` |
+
+The full table also has `name`, `autoinvoke`, `scope` and `description` columns.
 
 发现 N 个、已禁用 1 个、ask 0 个。
+
 调用者 agent：`build`（state 列按该 agent 的有效规则集求值，见规范 §3.6）
+
 ℹ️ 另有 2 个 skill 在其它 agent 下状态不同（详见 `inspect` 的逐 agent 表）。
 
 目标配置文件：`<config>\opencode.jsonc`
+
 - 目标文件含现有 permissions，直接在其数组中追加/删除
-```
 
 Use it before a bulk cleanup, and again after `disable` to confirm the state actually changed.
 

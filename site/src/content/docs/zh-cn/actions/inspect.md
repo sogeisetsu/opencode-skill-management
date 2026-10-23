@@ -56,8 +56,9 @@ agent），后面要么写「各 agent 结果一致」，要么列出结果不�
 
 ## 输出摘录
 
-```text
-# inspect: windows-shell
+工具返回的是 Markdown，下面是渲染后的形态。
+
+**元数据**
 
 | 字段 | 值 |
 |---|---|
@@ -70,21 +71,21 @@ agent），后面要么写「各 agent 结果一致」，要么列出结果不�
 | description | Windows shell conventions… |
 | frontmatter.disable-model-invocation | (未读到) |
 
-## id 推导
+**id 推导**
 
 - `id`：`windows-shell`
 - 来源：**注册表直接给出**（本工具不反推，仅列出对应规则供核对）
 - 路径：`<config>\skills\windows-shell\SKILL.md`
 
-## 有效判定
+**有效判定**
 
 | agent | effect | 命中规则 |
 |---|---|---|
-| build | deny | rules[3] = {"action":"skill","resource":"windows-shell","effect":"deny"} |
-| explorer | allow | rules[0] = {"action":"skill","resource":"*","effect":"allow"} |
+| build | deny | `rules[3] = {"action":"skill","resource":"windows-shell","effect":"deny"}` |
+| explorer | allow | `rules[0] = {"action":"skill","resource":"*","effect":"allow"}` |
 
-**结论**：`windows-shell` 对调用者 agent `build` 当前**不可用** —— 权限效果为 deny（命中 rules[3] = {...}），模型可见列表会隐藏它、且 `skill` 工具加载会被拒。
-```
+> **结论**：`windows-shell` 对调用者 agent `build` 当前**不可用** —— 权限效果为 deny（命中
+> `rules[3] = {...}`），模型可见列表会隐藏它、且 `skill` 工具加载会被拒。
 
 ## 什么时候用
 

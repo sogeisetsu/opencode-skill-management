@@ -1,10 +1,10 @@
 ---
-title: Skills, under control.
-description: List, inspect, disable and enable OpenCode skills without touching a single skill file.
+title: The skill switch for OpenCode V2.
+description: A native OpenCode V2 plugin that lists, inspects, disables and enables skills without touching a skill file.
 template: splash
 editUrl: false
 hero:
-  tagline: A native OpenCode V2 tool that makes skill permissions something you can read, change and reverse — one exact rule at a time.
+  tagline: A native plugin that lists, inspects, disables and enables skills by writing one permission rule. Skill files are never moved, edited or deleted.
   actions:
     - text: Get started
       link: /opencode-skill-management/overview/
@@ -16,16 +16,9 @@ hero:
 
 ```text title="opencode v2"
 $ opencode plugin add github:sogeisetsu/opencode-skill-management
-✓ skill_management (single file, zero runtime dependencies)
 
-$ skill_management({ action: "list" })
-# skills (N)
-id             source  scope  state
-…              …       …      …
-
-$ skill_management({ action: "disable", id: "windows-shell" })
-+ { "action": "skill", "resource": "windows-shell", "effect": "deny" } // skill_management
-✓ written, reloaded, read back — caller agent = deny
+$ opencode plugin list --builtin
+skill_management   local   <config>/plugins/skill_management.js
 ```
 
 <div class="oc-section">
