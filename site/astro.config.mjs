@@ -19,6 +19,10 @@ export default defineConfig({
         'zh-cn': { label: '简体中文', lang: 'zh-CN' },
       },
       customCss: ['./src/styles/custom.css'],
+      components: {
+        ThemeSelect: './src/components/ThemeSelect.astro',
+        LanguageSelect: './src/components/LanguageSelect.astro',
+      },
       // Dark is the default look. This runs before Starlight's theme module
       // (which is deferred) and only seeds the value when the visitor has not
       // chosen a theme yet; the toggle still works and is remembered.
