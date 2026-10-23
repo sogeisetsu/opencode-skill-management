@@ -26,7 +26,9 @@ export default defineConfig({
         {
           tag: 'script',
           content:
-            "try{if(!localStorage.getItem('starlight-theme'))localStorage.setItem('starlight-theme','dark')}catch(e){}",
+            // null = no choice yet; '' is Starlight's stored value for Auto and
+            // must be respected, otherwise Auto flips back to dark on every page.
+            "try{if(localStorage.getItem('starlight-theme')===null)localStorage.setItem('starlight-theme','dark')}catch(e){}",
         },
       ],
       // Pagefind ships no Windows binary for this environment; the site is

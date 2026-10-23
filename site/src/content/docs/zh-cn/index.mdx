@@ -1,10 +1,10 @@
 ---
-title: 把 skill 的开关拿回来。
-description: 列出、诊断、停用、恢复 OpenCode skill —— 不碰任何一个 skill 文件。
+title: OpenCode V2 的 skill 开关。
+description: 一个原生插件：列出、诊断、停用、恢复 skill，只写一条权限规则，不碰任何 skill 文件。
 template: splash
 editUrl: false
 hero:
-  tagline: 一个 OpenCode V2 原生工具，把 skill 权限变成能读懂、能修改、能撤回的东西 —— 一次只动一条精确规则。
+  tagline: 一个原生插件：列出、诊断、停用、恢复 skill，只写一条权限规则，不碰任何 skill 文件。
   actions:
     - text: 开始使用
       link: /opencode-skill-management/zh-cn/overview/
@@ -16,16 +16,9 @@ hero:
 
 ```text title="opencode v2"
 $ opencode plugin add github:sogeisetsu/opencode-skill-management
-✓ skill_management（单文件，无运行时依赖）
 
-$ skill_management({ action: "list" })
-# skills (N)
-id             source  scope  state
-…              …       …      …
-
-$ skill_management({ action: "disable", id: "windows-shell" })
-+ { "action": "skill", "resource": "windows-shell", "effect": "deny" } // skill_management
-✓ 已写入、重载并回读 —— 调用者 agent = deny
+$ opencode plugin list --builtin
+skill_management   local   <config>/plugins/skill_management.js
 ```
 
 <div class="oc-section">

@@ -56,21 +56,26 @@ skill_management({ action: "list" })
 
 ## 输出摘录
 
-```text
-# skills (N)
+工具返回的是 Markdown，下面是渲染后的形态（列有删减）。
 
-| id | name | autoinvoke | source | scope | state | path | description |
-|---|---|---|---|---|---|---|---|
-| windows-shell | windows-shell |  | config | user | available | <config>\skills\windows-shell\SKILL.md | Windows shell conventions… |
-| pdf-tools | pdf-tools |  | catalog | user | disabled | <cache>\skills\pdf-tools\SKILL.md | Read and extract PDF content… |
+**skills (N)**
+
+| id | source | state | path |
+|---|---|---|---|
+| windows-shell | config | available | `<config>\skills\windows-shell\SKILL.md` |
+| pdf-tools | catalog | disabled | `<cache>\skills\pdf-tools\SKILL.md` |
+
+完整表格还有 `name`、`autoinvoke`、`scope` 与 `description` 列。
 
 发现 N 个、已禁用 1 个、ask 0 个。
+
 调用者 agent：`build`（state 列按该 agent 的有效规则集求值，见规范 §3.6）
+
 ℹ️ 另有 2 个 skill 在其它 agent 下状态不同（详见 `inspect` 的逐 agent 表）。
 
 目标配置文件：`<config>\opencode.jsonc`
+
 - 目标文件含现有 permissions，直接在其数组中追加/删除
-```
 
 批量清理前跑一次，`disable` 之后再跑一次，确认状态真的变了。
 

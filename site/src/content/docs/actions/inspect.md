@@ -61,8 +61,10 @@ would not be the fix.
 
 ## Abridged output
 
-```text
-# inspect: windows-shell
+The tool returns Markdown. This is the rendered form of an `inspect` result; the table headers
+are Chinese, as the tool emits them.
+
+**Metadata**
 
 | 字段 | 值 |
 |---|---|
@@ -75,21 +77,21 @@ would not be the fix.
 | description | Windows shell conventions… |
 | frontmatter.disable-model-invocation | (未读到) |
 
-## id 推导
+**id 推导**
 
 - `id`：`windows-shell`
 - 来源：**注册表直接给出**（本工具不反推，仅列出对应规则供核对）
 - 路径：`<config>\skills\windows-shell\SKILL.md`
 
-## 有效判定
+**有效判定**
 
 | agent | effect | 命中规则 |
 |---|---|---|
-| build | deny | rules[3] = {"action":"skill","resource":"windows-shell","effect":"deny"} |
-| explorer | allow | rules[0] = {"action":"skill","resource":"*","effect":"allow"} |
+| build | deny | `rules[3] = {"action":"skill","resource":"windows-shell","effect":"deny"}` |
+| explorer | allow | `rules[0] = {"action":"skill","resource":"*","effect":"allow"}` |
 
-**结论**：`windows-shell` 对调用者 agent `build` 当前**不可用** —— 权限效果为 deny（命中 rules[3] = {...}），模型可见列表会隐藏它、且 `skill` 工具加载会被拒。
-```
+> **结论**：`windows-shell` 对调用者 agent `build` 当前**不可用** —— 权限效果为 deny（命中
+> `rules[3] = {...}`），模型可见列表会隐藏它、且 `skill` 工具加载会被拒。
 
 ## When to use it
 
