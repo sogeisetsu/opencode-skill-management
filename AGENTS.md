@@ -23,6 +23,15 @@ bash tools/linux-verify.sh           # Linux/WSL 全量验收：自带 Node/open
 - **在分支上做一件小事就提交一次**：一个可独立验证的改动 = 一个 commit（例如「加站点骨架」「补英文概览」「加部署 workflow」），不要攒成一个巨型提交。
 - 全部小任务完成、全部闸门通过后，再合并回 `main` 并推送。
 - 合并后如无必要不保留临时分支；不 force push、不重写历史。
+- 改文件前先 `git branch --show-current`；在 `main` 上先 `git switch -c`，不要先改再补分支。
+
+## 文档站（Astro + Starlight）
+
+- 内容映射：`/` ← `site/src/content/docs/index.mdx`；中文 ← `site/src/content/docs/zh-cn/`。`README.md` 与 `docs/*.md` 不是站点内容。
+- 命令：`npm run docs:dev`（热更新）· `docs:build` · `docs:check`（路由镜像 / 链接 / 语言切换）· `docs:preview`。
+- 任何页面改动都要同步 `docs/` 与 `docs/zh-cn/` 两份；新增页面还要在 `site/astro.config.mjs` 的 sidebar 里加条目。主页改 `index.mdx`，没有 `index.html`。
+- 已知坑：Starlight prose 的 `* + *` 上边距会顶偏网格卡片；中文大标题需要 `line-height` ≥ 1.15；主题/语言菜单不要用原生 `<select>`（hover 由浏览器绘制）；无图 hero 要覆盖默认 `7fr 4fr` 列；`base` 下的站内链接要带 `/opencode-skill-management` 前缀。
+- 视觉验收用 OpenChamber web：390 / 1440 两个宽度，亮/暗各一次，检查菜单悬停与选中态。
 
 ## 最容易踩的坑
 
