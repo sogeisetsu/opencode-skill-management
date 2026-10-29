@@ -65,7 +65,7 @@ Read the verification paragraph. The plugin distinguishes three outcomes:
    usually because that agent has its own later rule. Other agents may see the new rule.
 3. **Verification failed.** The original file was restored and the output says it rolled back.
 
-Case 2 is not a bug in the write; it is a rule-order fact. `inspect` shows the per-agent table.
+Case 2 is not a bug in the write; it is a rule-order fact. `inspect.agents[]` shows per-agent results.
 Remove or change the overriding agent rule yourself — the plugin does not edit agent-level
 permissions.
 

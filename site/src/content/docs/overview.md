@@ -48,9 +48,11 @@ The rest of the design follows from that:
 | No match means `ask` | An `ask` state may mean "explicitly soft-disabled" or "no rule matched"; `inspect` distinguishes them |
 | Global config only | Project-level config, `policies` and agent-level rules are reported, never edited |
 
-:::note[Output language]
-In 1.0.0 the tool's own messages and table headers are Chinese. Field values, rule JSON and
-paths are literal, and the structure described in these pages is the stable part.
+:::note[Output format]
+Every action returns one JSON object: `schemaVersion`, `action`, `ok`, `warnings`, plus the
+action-specific fields described on these pages. Human-readable strings inside `warnings`,
+`message`, `conclusion.message` and `error.message` are Chinese in 1.1.0; field names and
+literal values are stable.
 :::
 
 ## A first session
@@ -66,8 +68,8 @@ skill_management({ action: "disable", id: "windows-shell" })
 skill_management({ action: "enable",  id: "windows-shell" })
 ```
 
-`list` is read-only and safe to run at any time. `dryRun` on either write action prints the
-exact lines that would be added or removed and writes nothing.
+`list` is read-only and safe to run at any time. `dryRun` on either write action returns the
+exact lines in `diff` and writes nothing.
 
 ## What it will not do
 

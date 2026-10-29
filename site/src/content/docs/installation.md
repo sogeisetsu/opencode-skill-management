@@ -8,7 +8,7 @@ channel fits your setup; all three result in the same code.
 
 ## Requirements
 
-- OpenCode **V2**. Version 1.0.0 was accepted on host 2.0.32 on Windows and Linux, including
+- OpenCode **V2**. Version 1.1.0 was accepted on host 2.0.32 on Windows and Linux, including
   new-process end-to-end runs.
 - Node.js **18 or newer** in the environment that runs OpenCode.
 - No token, registry account or build step is needed.
@@ -72,8 +72,8 @@ Then ask the model to call the tool, or call it yourself:
 skill_management({ action: "list" })
 ```
 
-The `list` header and the target config path at the end are enough to confirm that the plugin is
-reading the host registries.
+The `list` result — `config.file` and the `skills[]` array — is enough to confirm that the
+plugin is reading the host registries.
 
 ## Notes on loading
 
