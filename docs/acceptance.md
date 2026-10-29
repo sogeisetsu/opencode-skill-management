@@ -289,6 +289,21 @@ opencode run --standalone --auto --format json '调用原生工具 skill_managem
 
 宿主为什么能接受这些形态、以及 `output` / `content` 的运行时规则，见 `docs/preflight.md` §7。
 
+### 发布结果（2026-10-30）
+
+| 步骤 | 结果 |
+|---|---|
+| `git push origin main` + `git push origin v1.1.0` | ✅ `main` 到 `e704326`；annotated tag `v1.1.0` |
+| CI `verify`（run 40970307896） | ✅ `ubuntu-latest` + `windows-latest` 都 success（同一套 260 项） |
+| CI `pages`（run 40970473537） | ✅ 文档站重新部署 |
+| CI `publish`（run 40970557520，tag 触发） | ✅ `+ opencode-skill-management@1.1.0`，dist-tag `latest`，SLSA provenance 已生成 |
+| `npm view … dist-tags --prefer-online` | `{ latest: '1.1.0' }`；`registry.npmjs.org` 上也已出现 `1.1.0` |
+| `npm view …@1.1.0 dist.integrity dist.shasum` | `sha512-gt020/q162504…BbhjaQ==` / `dee38e281aa5d2a0496d2f44722e316872326608`（与 publish 日志一致） |
+| GitHub Release `v1.1.0` | ✅ 附件 `opencode-skill-management-1.1.0.tgz` 与 `skill_management.js`（不只是 Source code） |
+| 本地安装副本 | ✅ 与 `src` 同哈希 `42443121…`（75756 bytes） |
+
+> npm publish 日志会写「being processed and may take a few minutes」；本次约 1 分钟后 `registry.npmjs.org` 才能查到 `1.1.0`，本地 `npm view` 可能还回旧缓存，用 `--prefer-online` 或直接查 registry 为准。
+
 ## 复跑方式
 
 ```pwsh
