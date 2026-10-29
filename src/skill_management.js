@@ -843,19 +843,88 @@ function pickAgent(agents, agentId) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 输出格式化
+// 输出：结构化 JSON
 // ─────────────────────────────────────────────────────────────
 
-function mdTable(headers, rows) {
-  const esc = (v) => String(v ?? "").replace(/\|/g, "\\|").replace(/\r?\n/g, " ")
-  const line = (cells) => "| " + cells.map(esc).join(" | ") + " |"
-  return [line(headers), "|" + headers.map(() => "---").join("|") + "|", ...rows.map(line)].join("\n")
+/**
+ * 结果 JSON 的版本。加字段不升版本，改已有字段的含义才升。
+ *
+ * 宿主 2.0.32 的工具运行时（opencode.exe 内联代码，已实测）：
+ *  - 声明了 `output` 就必须返回 `output`，否则报 `Tool did not return its declared output`；
+ *  - 没声明却返回 `output` 会报 `Tool result declared output without an output schema`；
+ *  - 声明后若不返回 `content`，宿主把 content 设为 `JSON.stringify(output)`。
+ * 所以这里同时给 output（供宿主校验）与缩进后的 JSON content（模型实际读到的文本）。
+ */
+export const OUTPUT_SCHEMA_VERSION = 1
+
+/**
+ * 只声明跨动作的契约（必需字段 + 类型）。动作自己的字段见文档站。
+ * 不用 oneOf / $ref / nullable：宿主的 JSON Schema→内部 schema 转换没有实测过深嵌套形态，
+ * 校验失败会让整次调用变成宿主错误，不值得。
+ */
+export const OUTPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: true,
+  properties: {
+    schemaVersion: { type: "integer" },
+    action: { type: "string" },
+    ok: { type: "boolean" },
+    dryRun: { type: "boolean" },
+    changed: { type: "boolean" },
+    id: { type: "string" },
+    effect: { type: "string" },
+    reason: { type: "string" },
+    message: { type: "string" },
+    warnings: { type: "array", items: { type: "string" } },
+    error: {
+      type: "object",
+      additionalProperties: true,
+      properties: {
+        code: { type: "string" },
+        message: { type: "string" },
+      },
+      required: ["code", "message"],
+    },
+  },
+  required: ["schemaVersion", "action", "ok", "warnings"],
 }
 
-function truncate(s, n = 80) {
-  if (!s) return ""
-  const first = String(s).split(/\r?\n/)[0]
-  return first.length > n ? first.slice(0, n - 1) + "…" : first
+/** JSON.stringify 会丢掉 undefined，但宿主先校验 output —— 校验前就把 undefined 清干净 */
+function stripUndefined(value) {
+  if (Array.isArray(value)) return value.map(stripUndefined)
+  if (value && typeof value === "object") {
+    const out = {}
+    for (const [k, v] of Object.entries(value)) if (v !== undefined) out[k] = stripUndefined(v)
+    return out
+  }
+  return value
+}
+
+function result(action, ok, body = {}) {
+  const { warnings = [], ...rest } = body
+  return stripUndefined({ schemaVersion: OUTPUT_SCHEMA_VERSION, action, ok, warnings, ...rest })
+}
+
+function okResult(action, body) {
+  return result(action, true, body)
+}
+
+function failResult(action, code, message, body = {}) {
+  return result(action, false, { ...body, error: { code, message } })
+}
+
+/** 工具返回值：output 供宿主按 OUTPUT_SCHEMA 校验，content 是模型读到的 JSON 文本 */
+function wrap(payload) {
+  return { output: payload, content: JSON.stringify(payload, null, 2) }
+}
+
+function firstLine(s) {
+  return s ? String(s).split(/\r?\n/)[0] : undefined
+}
+
+/** 规则命中的统一引用：没有命中时 rule 为 null，不做假规则 */
+function ruleRef(st) {
+  return st && st.index >= 0 ? { index: st.index, rule: st.rule } : { index: -1, rule: null }
 }
 
 function ensureArray(v) {
@@ -912,57 +981,46 @@ async function actList(ctx) {
   const target = resolveTargetConfig()
   const side = loadSidecar(target.configDir)
 
-  const rows = []
-  let disabled = 0
-  let ask = 0
+  const warnings = []
   const all = skills.map((raw) => normalizeSkill(raw))
   // 规范 §3.6：有效状态按**单个 agent** 的规则集求值。绝不能把所有 agent 的规则合并去重——
   // 那会把子 agent（explorer / title …）的 deny 泄漏给调用者（v5 的 bug：29 个里 28 个假 disabled）。
   const callerAgent = pickAgent(agents, ctx.__agentId)
   const callerRules = ensureArray(callerAgent?.permissions)
-  const callerId = callerAgent?.id ?? "(未知)"
+  const callerId = callerAgent?.id ?? null
+  const callerVerified = Boolean(ctx.__agentId) && agents.some((a) => a.id === ctx.__agentId)
+  let disabled = 0
+  let ask = 0
   let diverged = 0
-  for (const s of all) {
+
+  const rows = all.map((s) => {
     const st = s.id ? stateOf(callerRules, s.id) : { effect: "unknown" }
     if (st.effect === "deny") disabled++
     else if (st.effect === "ask") ask++
     if (s.id && agents.length > 1) {
       if (agents.some((a) => stateOf(ensureArray(a.permissions), s.id).effect !== st.effect)) diverged++
     }
-    rows.push([
-      s.id ?? "(unknown)",
-      s.name ?? "",
-      s.autoinvoke === false ? "off" : "",
-      classifySource(s.path),
-      classifyScope(s.path, home),
-      st.effect === "allow" ? "available" : st.effect === "deny" ? "disabled" : st.effect,
-      s.path ?? "",
-      truncate(s.description, 60),
-    ])
-  }
-  rows.sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+    return {
+      id: s.id ?? null,
+      name: s.name ?? null,
+      autoinvoke: s.autoinvoke === undefined ? null : Boolean(s.autoinvoke),
+      source: classifySource(s.path),
+      scope: classifyScope(s.path, home),
+      state: s.id ? (st.effect === "allow" ? "available" : st.effect === "deny" ? "disabled" : st.effect) : "unknown",
+      path: s.path ?? null,
+      description: firstLine(s.description) ?? null,
+    }
+  })
+  rows.sort((a, b) => String(a.id).localeCompare(String(b.id)))
   const derivedCount = all.filter((s) => s.idSource === "derived").length
 
-  const lines = []
-  lines.push(`# skills (${rows.length})`)
-  lines.push("")
-  lines.push(
-    mdTable(["id", "name", "autoinvoke", "source", "scope", "state", "path", "description"], rows),
-  )
-  lines.push("")
-  lines.push(`发现 ${rows.length} 个、已禁用 ${disabled} 个、ask ${ask} 个。`)
-  lines.push(`调用者 agent：\`${callerId}\`（state 列按该 agent 的有效规则集求值，见规范 §3.6）`)
-  if (!ctx.__agentId || !agents.some((a) => a.id === ctx.__agentId)) {
-    lines.push(
-      `⚠️ 未能确认调用者 agent（context.agent = ${JSON.stringify(ctx.__agentId ?? null)}），state 列按 \`${callerId}\` 计算，可能不代表你的实际权限。`,
+  if (!callerVerified) {
+    warnings.push(
+      `未能确认调用者 agent（context.agent = ${JSON.stringify(ctx.__agentId ?? null)}），state 按 \`${callerId ?? "(未知)"}\` 计算，可能不代表你的实际权限。`,
     )
   }
-  if (diverged > 0) {
-    lines.push(`ℹ️ 另有 ${diverged} 个 skill 在其它 agent 下状态不同（详见 \`inspect\` 的逐 agent 表）。`)
-  }
-  if (derivedCount > 0) {
-    lines.push(`注：其中 ${derivedCount} 个 id 由路径反推（注册表项未提供 \`id\`；推导规则见 \`inspect\`）。`)
-  }
+  if (diverged > 0) warnings.push(`另有 ${diverged} 个 skill 在其它 agent 下状态不同（逐 agent 明细见 inspect）。`)
+  if (derivedCount > 0) warnings.push(`其中 ${derivedCount} 个 id 由路径反推（注册表项未提供 id；推导规则见 inspect）。`)
 
   const recorded = side.rules.map((r) => r.id)
   // C3：resolveTargetConfig 已把目标文件读盘并解析过，直接用其中的 items；
@@ -970,48 +1028,58 @@ async function actList(ctx) {
   const configRules = target.doc ? itemsToRules(target.doc.items) : readConfigRules(target.file)
 
   if (!side.ok) {
-    lines.push("")
-    lines.push(
-      `⚠️ sidecar \`${side.file}\` 读取失败（${side.error ?? "未知原因"}）：本次忽略它的记录，结论只来自实际规则集；\`enable\` 仍可靠行尾标记注释定位。`,
+    warnings.push(
+      `sidecar \`${side.file}\` 读取失败（${side.error ?? "未知原因"}）：本次忽略它的记录，结论只来自实际规则集；enable 仍可靠行尾标记注释定位。`,
     )
   }
 
   // (1) sidecar 记录了某条规则，但配置里已无对应规则 → 不一致（规范 §3.1 / §4.4 要求的那条）
+  const stale = []
   if (side.ok && configRules !== null && side.rules.length > 0) {
-    const stale = side.rules.filter(
-      (r) => !configRules.some((c) => c.action === PERMISSION_ACTION && c.resource === r.id && c.effect === (r.effect ?? "deny")),
-    )
+    for (const r of side.rules) {
+      if (!configRules.some((c) => c.action === PERMISSION_ACTION && c.resource === r.id && c.effect === (r.effect ?? "deny"))) {
+        stale.push(r.id)
+      }
+    }
     if (stale.length > 0) {
-      lines.push("")
-      lines.push(
-        `⚠️ sidecar 与配置不一致：sidecar 记录了 ${stale.map((s) => `\`${s.id}\``).join("、")}，但配置 \`${target.file}\` 里已无对应规则（未自动重放）。这些 skill 已按实际规则集显示为可用。`,
+      warnings.push(
+        `⚠️ sidecar 与配置不一致：sidecar 记录了 ${stale.map((s) => `\`${s}\``).join("、")}，但配置 \`${target.file}\` 里已无对应规则（未自动重放）。这些 skill 已按实际规则集显示为可用。`,
       )
     }
   }
 
   // (2) 配置里有本工具形状的规则，但 sidecar 无记录 → 可能是手工添加或注释被剥离过
+  const unrecorded = []
   if (side.ok && configRules !== null) {
-    const unrecorded = configRules.filter(
-      (c) => c.action === PERMISSION_ACTION && !side.rules.some((r) => r.id === c.resource),
-    )
+    for (const c of configRules) {
+      if (c.action === PERMISSION_ACTION && !side.rules.some((r) => r.id === c.resource)) unrecorded.push({ resource: c.resource, effect: c.effect })
+    }
     if (unrecorded.length > 0) {
-      lines.push("")
-      lines.push(
-        `ℹ️ 配置里有 ${unrecorded.length} 条 \`skill\` 规则在 sidecar 里没有记录：${unrecorded.map((u) => `\`${u.resource}\`(${u.effect})`).join("、")}（可能为手工添加；\`enable\` 需要标记注释或 sidecar 记录才能唯一确认要删的那一条）`,
+      warnings.push(
+        `配置里有 ${unrecorded.length} 条 skill 规则在 sidecar 里没有记录：${unrecorded.map((u) => `\`${u.resource}\`(${u.effect})`).join("、")}（可能为手工添加；enable 需要标记注释或 sidecar 记录才能唯一确认要删的那一条）。`,
       )
     }
   }
 
   // (3) sidecar 记的 id 已不在注册表里
   const missing = recorded.filter((id) => !all.some((s) => s.id === id))
-  if (missing.length > 0) {
-    lines.push("")
-    lines.push(`⚠️ sidecar 记的 ${missing.map((m) => `\`${m}\``).join("、")} 已不在注册表里（未自动重放）`)
-  }
-  lines.push("")
-  lines.push(`目标配置文件：\`${target.file}\``)
-  for (const n of target.notes) lines.push(`- ${n}`)
-  return lines.join("\n")
+  if (missing.length > 0) warnings.push(`sidecar 记的 ${missing.map((m) => `\`${m}\``).join("、")} 已不在注册表里（未自动重放）。`)
+
+  return okResult("list", {
+    callerAgent: { id: callerId, verified: callerVerified },
+    summary: { total: rows.length, disabled, ask, diverged, derivedIds: derivedCount },
+    skills: rows,
+    config: {
+      file: target.file,
+      configDir: target.configDir,
+      configDirs: target.configDirs,
+      hadPermissions: target.hadPermissions,
+      notes: target.notes,
+    },
+    sidecar: { file: side.file, ok: side.ok, error: side.error ?? null },
+    consistency: { staleSidecarIds: stale, unrecordedRules: unrecorded, missingFromRegistry: missing },
+    warnings,
+  })
 }
 
 async function actInspect(ctx, idRaw, nameRaw) {
@@ -1027,165 +1095,160 @@ async function actInspect(ctx, idRaw, nameRaw) {
       target = byName[0]
       via = "name"
     } else if (byName.length > 1) {
-      return `名称 \`${nameRaw}\` 命中多个 skill，请改用 id：${byName.map((s) => `\`${s.id}\``).join("、")}`
+      return failResult("inspect", "name_ambiguous", `名称 \`${nameRaw}\` 命中多个 skill，请改用 id。`, {
+        candidates: byName.map((s) => s.id).filter(Boolean),
+      })
     }
   }
   if (!target) {
     const needle = idRaw ?? nameRaw
-    const near = all.filter((s) => String(s.id).includes(String(needle)) || String(s.name).includes(String(needle)))
-    return [
-      `未找到 skill \`${needle}\`。`,
-      near.length > 0 ? `近似：${near.map((s) => `\`${s.id}\``).join("、")}` : "注册表里没有相近的 id。",
-      "（结论来自实际读到的注册表，未做猜测）",
-    ].join("\n")
+    const near = all
+      .filter((s) => String(s.id).includes(String(needle)) || String(s.name).includes(String(needle)))
+      .map((s) => s.id)
+      .filter(Boolean)
+    return failResult("inspect", "skill_not_found", `未找到 skill \`${needle}\`。（结论来自实际读到的注册表，未做猜测）`, { near })
   }
 
   const fm = readFrontmatter(target.content)
-  const lines = []
-  lines.push(`# inspect: ${target.id}`)
-  lines.push("")
-  lines.push(mdTable(["字段", "值"], [
-    ["id", target.id],
-    ["name", target.name ?? ""],
-    ["name ≠ id", target.name && target.id && target.name !== target.id ? "是（frontmatter.name 覆盖了 id）" : "否"],
-    ["匹配方式", via === "id" ? "按 id 精确匹配" : "按 name 别名匹配"],
-    ["path", target.path ?? ""],
-    ["source", classifySource(target.path)],
-    ["scope", classifyScope(target.path, home)],
-    ["description", truncate(target.description, 120)],
-    ["frontmatter.name", fm.name ?? "(未读到)"],
-    ["frontmatter.disable-model-invocation", fm.disableModelInvocation === undefined ? "(未读到)" : String(fm.disableModelInvocation)],
-    ["autoinvoke（注册表）", target.autoinvoke === undefined ? "(未提供)" : String(target.autoinvoke)],
-  ]))
-  lines.push("")
-  lines.push("## id 推导")
-  lines.push("")
-  if (target.path) {
-    const dir = path.dirname(target.path)
-    const base = path.basename(target.path)
-    const rule =
-      base === "SKILL.md"
-        ? "`<dir>/SKILL.md` → 取 SKILL.md 所在目录名"
-        : "`<dir>/<name>.md` → 取文件名（去掉 .md）"
-    lines.push(`- \`id\`：\`${target.id}\``)
-    lines.push(
-      `- 来源：${
-        target.idSource === "derived"
-          ? "**由路径反推**（注册表项未提供 `id`，按 §3.5 规则推导）"
-          : "**注册表直接给出**（本工具不反推，仅列出对应规则供核对）"
-      }`,
-    )
-    lines.push(`- 推导规则：${rule}`)
-    lines.push(`- 输入路径字段：\`${target.pathField ?? "path"}\``)
-    lines.push(`- 路径：\`${target.path}\``)
-    lines.push(`- 规则输入：\`dirname = ${dir}\`，\`basename = ${base}\``)
-  } else {
-    lines.push("- 注册表项既没有 `id` 也没有可用的路径字段 → `id` 无法确定。")
-    lines.push("- 本工具不会猜：下面的有效判定按 `id` 为空处理。")
-  }
-  if (target.name && target.id && target.name !== target.id) {
-    lines.push(`- frontmatter 的 name（\`${target.name}\`）与 id 不同：\`disable\`/\`enable\` 用 id，两者都会显示。`)
-  }
+  const idDerivation = target.path
+    ? {
+        idSource: target.idSource,
+        pathField: target.pathField ?? "path",
+        dir: path.dirname(target.path),
+        base: path.basename(target.path),
+        rule:
+          path.basename(target.path) === "SKILL.md"
+            ? "<dir>/SKILL.md → 取 SKILL.md 所在目录名"
+            : "<dir>/<name>.md → 取文件名（去掉 .md）",
+        explained:
+          target.idSource === "derived"
+            ? "由路径反推（注册表项未提供 id，按 §3.5 规则推导）"
+            : "注册表直接给出（本工具不反推，仅列出对应规则供核对）",
+      }
+    : {
+        idSource: "none",
+        pathField: null,
+        dir: null,
+        base: null,
+        rule: null,
+        explained: "注册表项既没有 id 也没有可用的路径字段 → id 无法确定；本工具不会猜。",
+      }
 
-  lines.push("")
-  lines.push("## 有效判定")
-  lines.push("")
-  const details = []
-  for (const a of agents) {
-    const rules = ensureArray(a.permissions)
-    const st = stateOf(rules, target.id)
-    const src = st.index >= 0 ? `rules[${st.index}] = ${JSON.stringify(st.rule)}` : "无规则命中 → 回退 ask"
-    details.push([a.id, st.effect, src])
-  }
-  const diffs = details.filter((d) => d[1] !== details[0]?.[1])
-  lines.push(
-    mdTable(["agent", "effect", "命中规则"], details.slice(0, 30)),
-  )
-  lines.push("")
-  if (details.length > 1) {
-    lines.push(
-      diffs.length === 0
-        ? "各 agent 结果一致，无 agent 级差异。"
-        : `agent 级差异：${diffs.map((d) => `\`${d[0]}\` = ${d[1]}`).join("、")}`,
-    )
-  }
-  lines.push("")
+  const details = agents.map((a) => {
+    const st = stateOf(ensureArray(a.permissions), target.id)
+    return { id: a.id, effect: st.effect, ...ruleRef(st) }
+  })
 
   const callerAgent = pickAgent(agents, ctx.__agentId)
   const callerRules = ensureArray(callerAgent?.permissions)
   const callerState = stateOf(callerRules, target.id)
-  const callerEffect = callerState.effect
-  const callerName = callerAgent?.id ?? "(未知)"
-  const broad = callerEffect === "deny" && callerState.rule?.resource !== target.id ? callerState.rule : undefined
-  if (broad) {
-    lines.push(`- 调用者 agent \`${callerName}\` 下，该 id 被更宽的规则覆盖为 deny：\`${JSON.stringify(broad)}\`，无需新增规则。`)
-  }
+  const callerName = callerAgent?.id ?? null
+  const broad = callerState.effect === "deny" && callerState.rule?.resource !== target.id ? callerState.rule : null
+  const state = callerState.effect === "deny" ? "disabled" : callerState.effect === "ask" ? "ask" : "available"
   const hitText =
     callerState.index >= 0
       ? `命中 rules[${callerState.index}] = ${JSON.stringify(callerState.rule)}`
       : "无规则命中 → 回退 ask"
-  lines.push(
-    callerEffect === "deny"
-      ? `**结论**：\`${target.id}\` 对调用者 agent \`${callerName}\` 当前**不可用** —— 权限效果为 deny（${hitText}），模型可见列表会隐藏它、且 \`skill\` 工具加载会被拒。`
-      : callerEffect === "ask"
-        ? `**结论**：\`${target.id}\` 对调用者 agent \`${callerName}\` 当前**可用但需确认** —— 权限效果为 ask（${hitText}）：仍在模型可见列表里，加载时询问。`
-        : `**结论**：\`${target.id}\` 对调用者 agent \`${callerName}\` 当前**可用** —— 权限效果为 ${callerEffect}（${hitText}）。`,
-  )
-  return lines.join("\n")
+  const message =
+    state === "disabled"
+      ? `\`${target.id}\` 对调用者 agent \`${callerName ?? "(未知)"}\` 当前不可用：权限效果为 deny（${hitText}），模型可见列表会隐藏它、且 skill 工具加载会被拒。`
+      : state === "ask"
+        ? `\`${target.id}\` 对调用者 agent \`${callerName ?? "(未知)"}\` 当前可用但需确认：权限效果为 ask（${hitText}）：仍在模型可见列表里，加载时询问。`
+        : `\`${target.id}\` 对调用者 agent \`${callerName ?? "(未知)"}\` 当前可用：权限效果为 ${callerState.effect}（${hitText}）。`
+
+  const warnings = []
+  if (!ctx.__agentId || !agents.some((a) => a.id === ctx.__agentId)) {
+    warnings.push(
+      `未能确认调用者 agent（context.agent = ${JSON.stringify(ctx.__agentId ?? null)}），结论按 \`${callerName ?? "(未知)"}\` 计算，可能不代表你的实际权限。`,
+    )
+  }
+
+  return okResult("inspect", {
+    matchedBy: via,
+    skill: {
+      id: target.id,
+      name: target.name ?? null,
+      nameDiffersFromId: Boolean(target.name && target.id && target.name !== target.id),
+      path: target.path ?? null,
+      source: classifySource(target.path),
+      scope: classifyScope(target.path, home),
+      description: firstLine(target.description) ?? null,
+      autoinvoke: target.autoinvoke === undefined ? null : Boolean(target.autoinvoke),
+      frontmatter: {
+        name: fm.name ?? null,
+        disableModelInvocation: fm.disableModelInvocation === undefined ? null : Boolean(fm.disableModelInvocation),
+      },
+    },
+    idDerivation,
+    agents: details,
+    divergentAgents: details.filter((d) => d.effect !== callerState.effect),
+    caller: {
+      id: callerName,
+      effect: callerState.effect,
+      ...ruleRef(callerState),
+      coveredByBroaderRule: Boolean(broad),
+      broaderRule: broad,
+    },
+    conclusion: { state, message },
+    warnings,
+  })
 }
 
 async function actDisable(ctx, idRaw, nameRaw, effectRaw, dryRun) {
   const { skills, agents } = await readContext(ctx)
   const all = skills.map((s) => normalizeSkill(s))
   const resolved = resolveId(all, idRaw, nameRaw)
-  if (resolved.error) return resolved.error
+  if (resolved.error) return failResult("disable", resolved.error.code, resolved.error.message, resolved.error.body)
+
   const id = resolved.id
   const effect = effectRaw === "ask" ? "ask" : "deny"
-
   const target = resolveTargetConfig()
-  const out = []
   const agentId = ctx.__agentId
 
   const caller = pickAgent(agents, agentId)
   const callerRules = ensureArray(caller?.permissions)
   const current = stateOf(callerRules, id)
-  out.push(`调用者 agent：\`${caller?.id ?? "(未知)"}\``)
-  out.push(`目标：\`${id}\`（当前效果：${current.effect}）`)
+  const head = {
+    id,
+    effect,
+    dryRun,
+    callerAgent: caller?.id ?? null,
+    before: ruleRef(current),
+    targetFile: target.file,
+    configNotes: target.notes,
+  }
 
   if (current.effect === "deny") {
     // 区分"本工具/精确规则已停用"与"被更宽的规则覆盖"
-    const broad = current.index >= 0 && current.rule?.resource !== id ? current.rule : undefined
-    if (broad) {
-      out.push(`已被更宽的规则覆盖为 deny，无需新增：\`${JSON.stringify(broad)}\`（agent 规则集 rules[${current.index}]）。未做任何修改。`)
-    } else {
-      out.push("已经是停用状态，未做任何修改。")
-      out.push(`命中：${current.index >= 0 ? `rules[${current.index}] = ${JSON.stringify(current.rule)}` : "（无规则命中 → 回退 ask）"}`)
-    }
-    return out.join("\n")
+    const broad = current.index >= 0 && current.rule?.resource !== id ? current.rule : null
+    const hit = current.index >= 0 ? `rules[${current.index}] = ${JSON.stringify(current.rule)}` : "无规则命中 → 回退 ask"
+    return okResult("disable", {
+      ...head,
+      changed: false,
+      reason: broad ? "covered_by_broader_rule" : "already_disabled",
+      message: broad
+        ? `已被更宽的规则覆盖为 deny，无需新增：${JSON.stringify(broad)}（调用者规则集 rules[${current.index}]）。未做任何修改。`
+        : `已经是停用状态，未做任何修改（命中：${hit}）。`,
+    })
   }
 
-  if (!fs.existsSync(target.file)) {
-    // 允许新建：dryRun 时只描述
-  }
   const { text, bom } = fs.existsSync(target.file) ? readTextFile(target.file) : { text: "{}\n", bom: false }
   const { text: nextText, createdBlock } = insertRule(text, id, effect)
   strictValidate(nextText)
-
-  out.push(`目标文件：\`${target.file}\``)
-  for (const n of target.notes) out.push(`- ${n}`)
-  out.push("")
-  out.push("将写入（新增/改动的行，逐字来自实际将落盘的内容）：")
-  out.push("```jsonc")
-  for (const line of changedRegion(text, nextText)) out.push(line)
-  out.push("```")
+  const diff = changedRegion(text, nextText)
 
   if (dryRun) {
-    out.push("")
-    out.push("dryRun：未写入任何文件。")
-    return out.join("\n")
+    return okResult("disable", {
+      ...head,
+      changed: false,
+      planned: true,
+      createdBlock,
+      diff,
+      message: "dryRun：未写入任何文件。",
+    })
   }
 
-  if (fs.existsSync(target.file)) backupFile(target.file, target.configDir)
+  const backup = fs.existsSync(target.file) ? backupFile(target.file, target.configDir) : null
   writeTextFile(target.file, nextText, bom)
 
   // 回读校验：优先走宿主 reload，再复核生效规则集（会轮询等待异步重载）。
@@ -1196,12 +1259,16 @@ async function actDisable(ctx, idRaw, nameRaw, effectRaw, dryRun) {
   const verified = await verifyEffect(ctx, id, effect, caller?.id, beforeCount)
   if (!verified.ok) {
     writeTextFile(target.file, text, bom)
-    out.push("")
-    out.push(`❌ 回读校验失败（期望 ${effect}，实际 ${verified.actual}）；已回滚，文件未留下半成品。`)
     // 回滚后配置已复原，写入前的注册表快照又是准确的了 —— 顺手说明是谁挡的路
     // （fast-responder 这类 agent 自有规则排在全局规则之后的典型情形）。
-    out.push(describeCallerHit(agents, agentId, id).text)
-    return out.join("\n")
+    return failResult("disable", "verification_failed", `回读校验失败（期望 ${effect}，实际 ${verified.actual}）；已回滚，文件未留下半成品。`, {
+      ...head,
+      changed: false,
+      rolledBack: true,
+      backup,
+      verification: { ok: false, expected: effect, actual: verified.actual, via: verified.via },
+      warnings: [describeCallerHit(agents, agentId, id).text],
+    })
   }
 
   const side = loadSidecar(target.configDir)
@@ -1209,22 +1276,38 @@ async function actDisable(ctx, idRaw, nameRaw, effectRaw, dryRun) {
   side.rules.push({ id, effect, file: target.file, insertedAt: new Date().toISOString(), createdBlock: Boolean(createdBlock) })
   const sideFile = saveSidecar(target.configDir, side)
 
-  out.push("")
-  out.push(`✅ 已写入并校验通过：调用者 agent \`${verified.caller}\` = ${verified.actual}（${verified.via}）。sidecar：\`${sideFile}\``)
+  const warnings = []
   if (verified.actual !== effect) {
     // N3：规则写入是真的（精确规则数增加了），但对调用者不产生该效果 —— 不许把它写成"已生效"。
-    out.push(
-      `ℹ️ 注意：规则确实已写入并被宿主读入（精确规则数 ${beforeCount}→${verified.count}），但对调用者 agent \`${verified.caller}\` 的**实际效果是 ${verified.actual}** —— 该 agent 自己的规则排在全局规则之后，覆盖了它；换其它 agent 调用时 ${effect} 才生效。`,
+    warnings.push(
+      `注意：规则确实已写入并被宿主读入（精确规则数 ${beforeCount}→${verified.count}），但对调用者 agent \`${verified.caller}\` 的实际效果是 ${verified.actual} —— 该 agent 自己的规则排在全局规则之后，覆盖了它；换其它 agent 调用时 ${effect} 才生效。`,
     )
-  } else {
-    out.push(`规则集顺序：追加在末尾 → 对该 agent 优先级最高。`)
   }
   if (verified.diverged && verified.diverged.length > 0) {
-    out.push(
-      `ℹ️ 另有 ${verified.diverged.length} 个 agent 结果不同（它们用自己的后续规则覆盖了全局规则）：${verified.diverged.map((d) => `\`${d.id}\`=${d.effect}`).join("、")}`,
+    warnings.push(
+      `另有 ${verified.diverged.length} 个 agent 结果不同（它们用自己的后续规则覆盖了全局规则）：${verified.diverged.map((d) => `\`${d.id}\`=${d.effect}`).join("、")}。`,
     )
   }
-  return out.join("\n")
+
+  return okResult("disable", {
+    ...head,
+    changed: true,
+    createdBlock,
+    diff,
+    backup,
+    sidecar: sideFile,
+    verification: {
+      ok: true,
+      via: verified.via,
+      caller: verified.caller,
+      expected: effect,
+      actual: verified.actual,
+      beforeCount,
+      count: verified.count,
+      diverged: verified.diverged,
+    },
+    warnings,
+  })
 }
 
 function countExactRules(rules, id, effect) {
@@ -1317,11 +1400,11 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
   const agentId = ctx.__agentId
   const all = skills.map((s) => normalizeSkill(s))
   const resolved = resolveId(all, idRaw, nameRaw)
-  if (resolved.error) return resolved.error
+  if (resolved.error) return failResult("enable", resolved.error.code, resolved.error.message, resolved.error.body)
   const id = resolved.id
 
   const callerAgent = pickAgent(agents, agentId)
-  const callerName = callerAgent?.id ?? "(未知)"
+  const callerName = callerAgent?.id ?? null
   const callerRules = ensureArray(callerAgent?.permissions)
   const before = stateOf(callerRules, id)
 
@@ -1348,16 +1431,17 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
     docs.push(doc)
   }
 
-  const out = []
-  out.push(`目标：\`${id}\``)
-  out.push(`调用者 agent：\`${callerName}\`（当前效果：${before.effect}）`)
-  out.push(`目标文件：${files.map((f) => `\`${f}\``).join("、")}`)
+  const lineOf = (text, item) => {
+    const { ls, le } = lineBounds(text, item.start)
+    return text.slice(ls, le).trim()
+  }
+
+  const head = { id, dryRun, callerAgent: callerName, targetFiles: files, before: ruleRef(before) }
+  const warnings = []
   const unparsable = docs.filter((d) => !d.root).map((d) => d.file)
   if (unparsable.length > 0) {
     // "结论只来自实际读到的内容"：解析不了的文档既不定位也不删，但必须说清，否则会读成"没有规则"。
-    out.push(
-      `⚠️ 无法解析（JSONC 语法错误？）的配置文件：${unparsable.map((f) => `\`${f}\``).join("、")} —— 未从中定位任何规则，请先修好语法。`,
-    )
+    warnings.push(`无法解析（JSONC 语法错误？）的配置文件：${unparsable.map((f) => `\`${f}\``).join("、")} —— 未从中定位任何规则，请先修好语法。`)
   }
 
   // 候选项 = 精确命中该 id、且效果为 deny/ask 的规则（allow 不是「挡路的规则」，不删）。
@@ -1369,15 +1453,20 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
     }
   }
 
+  if (candidates.length === 0 && unparsable.length > 0) {
+    // 解析不了的配置既不能证明"没有这条规则"，也不能安全删除 —— 明确拒绝，别把"读不到"说成"无需修改"。
+    return failResult("enable", "config_unparsable", "拒绝执行：目标配置无法解析（JSONC 语法错误？），未从中定位任何规则，也未做任何修改。请先修好语法。", {
+      ...head,
+      changed: false,
+      callerHit: describeCallerHit(agents, agentId, id).text,
+      warnings,
+    })
+  }
+
   if (candidates.length === 0) {
-    out.push("")
     if (before.effect === "deny") {
       // §11.1 第 2 类：挡路的不是「这一行」，只报告不代改。
-      out.push("❌ 拒绝执行：配置里没有精确命中该 id 的全局规则 —— 挡路的不是这一行，删无可删。")
-      out.push(describeCallerHit(agents, agentId, id).text)
-      out.push("若命中的是 `policies` / `experimental.policies`，本工具无法读取（插件 ctx 没有 `config` 域），请手工核对。")
       // 相关规则 = action 匹配 skill 且 resource 的 glob 能匹配该 id（精确命中的是它的子集）。
-      // 复用已解析的 root，用 file+偏移 的 Set 去重（旧实现是 related.some(...) 的 O(n²) + 二次 parse）。
       const related = []
       const seen = new Set()
       for (const d of docs) {
@@ -1388,80 +1477,81 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
           const t = itemTriple(item)
           if (typeof t.action === "string" && globMatch(t.action, PERMISSION_ACTION) && typeof t.resource === "string" && globMatch(t.resource, id)) {
             seen.add(key)
-            related.push({ file: d.file, text: d.text, item })
+            related.push({ file: d.file, text: lineOf(d.text, item) })
           }
         }
       }
-      if (related.length > 0) {
-        out.push("")
-        out.push("配置里与该 id 相关的规则（原文）：")
-        for (const r of related) {
-          const { ls, le } = lineBounds(r.text, r.item.start)
-          out.push(`- \`${r.file}\``)
-          out.push("```jsonc")
-          out.push(r.text.slice(ls, le).trim())
-          out.push("```")
-        }
-      }
-    } else {
-      out.push(`配置里没有精确命中该 id 的 deny/ask 规则，无需修改（当前效果：${before.effect}）。`)
+      return failResult(
+        "enable",
+        "no_matching_rule",
+        "拒绝执行：配置里没有精确命中该 id 的全局规则 —— 挡路的不是这一行，删无可删。若命中的是 policies / experimental.policies，本工具无法读取（插件 ctx 没有 config 域），请手工核对。",
+        {
+          ...head,
+          changed: false,
+          callerHit: describeCallerHit(agents, agentId, id).text,
+          relatedRules: related,
+          warnings,
+        },
+      )
     }
-    return out.join("\n")
+    return okResult("enable", {
+      ...head,
+      changed: false,
+      reason: "nothing_to_enable",
+      message: `配置里没有精确命中该 id 的 deny/ask 规则，无需修改（当前效果：${before.effect}）。`,
+      warnings,
+    })
   }
 
   if (candidates.length > 1) {
     // §11.1 第 2 类：歧义。宿主按 findLast 求值，删错那条会「看起来成功但行为没变」。
-    out.push("")
-    out.push(`❌ 拒绝执行：配置里有 ${candidates.length} 条精确命中 \`${id}\` 的规则，无法唯一定位（宿主求值是最后一条命中算数）。`)
-    out.push("候选（请自行确认后手工处理）：")
-    for (const c of candidates) {
-      const { ls, le } = lineBounds(c.text, c.item.start)
-      out.push(`- \`${c.file}\``)
-      out.push("```jsonc")
-      out.push(c.text.slice(ls, le).trim())
-      out.push("```")
-    }
-    return out.join("\n")
+    return failResult(
+      "enable",
+      "ambiguous_rule",
+      `拒绝执行：配置里有 ${candidates.length} 条精确命中 \`${id}\` 的规则，无法唯一定位（宿主求值是最后一条命中算数）。`,
+      {
+        ...head,
+        changed: false,
+        candidates: candidates.map((c) => ({ file: c.file, text: lineOf(c.text, c.item) })),
+        warnings,
+      },
+    )
   }
 
   const hit = candidates[0]
   const marked = itemHasMarker(hit.text, hit.item)
-  let how
-  let origin
+  const recordTier = record && (record.effect ?? "deny") === hit.triple.effect
+  let location
   let warn = false
   if (marked) {
     // (a) 标记注释是文件内自证，优先级最高 —— 即使 sidecar 丢失也认。
-    how = "标记注释命中（文件内自证）"
-    origin = "本工具写入（同行标记注释）"
-  } else if (record && (record.effect ?? "deny") === hit.triple.effect) {
+    location = { how: "marker", origin: "本工具写入（同行标记注释）" }
+  } else if (recordTier) {
     // (b) 无标记，但 sidecar 有该 id 的记录且配置里恰好一条完全相同的三元组。
-    how = `sidecar 有 \`${id}\` 的记录，且配置里恰好一条完全相同的规则（${hit.triple.effect}）`
-    origin = "本工具写入（sidecar 记录；标记已缺失）"
+    location = { how: "sidecar", origin: "本工具写入（sidecar 记录；标记已缺失）" }
     warn = true
   } else {
     // (c) 两者都没有 → 拒绝，并给出原文。
-    out.push("")
-    out.push(`❌ 拒绝执行：既没有本工具标记注释，也没有 sidecar 记录能确认这条规则。`)
-    out.push(`配置 \`${hit.file}\` 里精确命中该 id 的规则（原文，请自行确认后手工处理）：`)
-    const { ls, le } = lineBounds(hit.text, hit.item.start)
-    out.push("```jsonc")
-    out.push(hit.text.slice(ls, le).trim())
-    out.push("```")
-    return out.join("\n")
+    return failResult("enable", "unverifiable_origin", "拒绝执行：既没有本工具标记注释，也没有 sidecar 记录能确认这条规则。", {
+      ...head,
+      changed: false,
+      rule: { file: hit.file, text: lineOf(hit.text, hit.item) },
+      warnings,
+    })
   }
 
-  const { ls, le } = lineBounds(hit.text, hit.item.start)
-  out.push(`定位方式：${how}`)
-  out.push("")
-  out.push("将删除：")
-  out.push("```jsonc")
-  out.push(hit.text.slice(ls, le).trim())
-  out.push("```")
-
+  const removed = lineOf(hit.text, hit.item)
   if (dryRun) {
-    out.push("")
-    out.push("dryRun：未写入任何文件。")
-    return out.join("\n")
+    return okResult("enable", {
+      ...head,
+      changed: false,
+      planned: true,
+      location,
+      rule: { file: hit.file, text: removed },
+      diff: [removed],
+      message: "dryRun：未写入任何文件。",
+      warnings,
+    })
   }
 
   let nextText = removeRuleByLine(hit.text, hit.item)
@@ -1471,28 +1561,30 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
     nextText = cleaned
     cleanedEmptyBlock = true
   }
-  backupFile(hit.file, target.configDir)
+  const backup = backupFile(hit.file, target.configDir)
   writeTextFile(hit.file, nextText, hit.bom)
 
   const beforeCount = countExactRules(callerRules, id, hit.triple.effect)
-  const verified = await verifyRuleRemoved(ctx, id, hit.triple.effect, beforeCount, callerAgent.id)
+  const verified = await verifyRuleRemoved(ctx, id, hit.triple.effect, beforeCount, callerAgent?.id)
   if (!verified.ok) {
     writeTextFile(hit.file, hit.text, hit.bom)
-    return out.join("\n") + `\n\n❌ 回读校验失败（调用者规则集里该规则未减少：${verified.actual}）；已回滚。`
+    return failResult("enable", "verification_failed", `回读校验失败（调用者规则集里该规则未减少：${verified.actual}）；已回滚。`, {
+      ...head,
+      changed: false,
+      rolledBack: true,
+      location,
+      rule: { file: hit.file, text: removed },
+      backup,
+      verification: { ok: false, via: verified.via, actual: verified.actual, expected: hit.triple.effect },
+      warnings,
+    })
   }
 
   side.rules = side.rules.filter((r) => r.id !== id)
   const sideFile = saveSidecar(target.configDir, side)
 
-  out.push("")
-  if (warn)
-    out.push(
-      `⚠️ 该规则没有本工具标记（可能被外部写者剥掉过注释），已按 sidecar 记录删除；建议核对一次配置。`,
-    )
-  if (cleanedEmptyBlock) out.push("已把因此变空的 `permissions` 块一并清理。")
-  out.push(`✅ 已删除并校验通过（${verified.via}）。sidecar：\`${sideFile}\``)
-  out.push(`- 被删规则的来源：${origin}`)
-  out.push(`- **删除后的生效效果**：调用者 agent \`${verified.caller}\` = **${verified.postEffect}**`)
+  if (warn) warnings.push("⚠️ 该规则没有本工具标记（可能被外部写者剥掉过注释），已按 sidecar 记录删除；建议核对一次配置。")
+  if (cleanedEmptyBlock) warnings.push("已把因此变空的 permissions 块一并清理。")
   if (verified.postEffect === "deny") {
     let fresh = []
     try {
@@ -1500,39 +1592,55 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
     } catch {
       fresh = []
     }
-    out.push(
-      `  - 仍为 deny：挡路的不是被删的这一行 —— ${describeCallerHit(fresh.length > 0 ? fresh : agents, agentId, id).text}`,
-    )
+    warnings.push(`仍为 deny：挡路的不是被删的这一行 —— ${describeCallerHit(fresh.length > 0 ? fresh : agents, agentId, id).text}`)
   }
   if (verified.diverged && verified.diverged.length > 0) {
-    out.push(
-      `ℹ️ 另有 ${verified.diverged.length} 个 agent 结果不同（它们用自己的后续规则覆盖了全局规则）：${verified.diverged.map((d) => `\`${d.id}\`=${d.effect}`).join("、")}`,
+    warnings.push(
+      `另有 ${verified.diverged.length} 个 agent 结果不同（它们用自己的后续规则覆盖了全局规则）：${verified.diverged.map((d) => `\`${d.id}\`=${d.effect}`).join("、")}。`,
     )
   }
-  return out.join("\n")
+
+  return okResult("enable", {
+    ...head,
+    changed: true,
+    location,
+    rule: { file: hit.file, text: removed },
+    backup,
+    sidecar: sideFile,
+    verification: { ok: true, via: verified.via, caller: verified.caller, effect: verified.postEffect },
+    warnings,
+  })
 }
 
 function resolveId(all, idRaw, nameRaw) {
-  if (!idRaw && !nameRaw) return { error: "缺少参数：请提供 `id`（或 `name` 别名）。" }
+  if (!idRaw && !nameRaw) return { error: { code: "missing_param", message: "缺少参数：请提供 id（或 name 别名）。" } }
   if (idRaw && all.some((s) => s.id === idRaw)) return { id: idRaw }
   if (nameRaw) {
     const byName = all.filter((s) => s.name === nameRaw)
     if (byName.length === 1) return { id: byName[0].id }
-    if (byName.length > 1) return { error: `名称 \`${nameRaw}\` 命中多个 skill：${byName.map((s) => `\`${s.id}\``).join("、")}。请改用 id。` }
+    if (byName.length > 1) {
+      return {
+        error: {
+          code: "name_ambiguous",
+          message: `名称 \`${nameRaw}\` 命中多个 skill：${byName.map((s) => `\`${s.id}\``).join("、")}。请改用 id。`,
+          body: { candidates: byName.map((s) => s.id).filter(Boolean) },
+        },
+      }
+    }
   }
   if (idRaw) {
     const byName = all.filter((s) => s.name === idRaw)
     if (byName.length === 1) return { id: byName[0].id }
-    const near = all.filter((s) => String(s.id).includes(String(idRaw)))
+    const near = all.filter((s) => String(s.id).includes(String(idRaw))).map((s) => s.id).filter(Boolean)
     return {
-      error: [
-        `注册表里没有 id \`${idRaw}\`。`,
-        near.length > 0 ? `相近：${near.map((s) => `\`${s.id}\``).join("、")}` : "没有相近的 id。",
-        "（结论来自实际读到的注册表，未做猜测）",
-      ].join("\n"),
+      error: {
+        code: "skill_not_found",
+        message: `注册表里没有 id \`${idRaw}\`。（结论来自实际读到的注册表，未做猜测）`,
+        body: { near },
+      },
     }
   }
-  return { error: `注册表里没有 \`${idRaw ?? nameRaw}\`。` }
+  return { error: { code: "skill_not_found", message: `注册表里没有 \`${idRaw ?? nameRaw}\`。` } }
 }
 
 function sleep(ms) {
@@ -1622,6 +1730,8 @@ const DESCRIPTION = [
   "`disable` adds one permission rule to the GLOBAL config so the skill is hidden from the model and its loading is rejected — it never touches skill files.",
   "`enable` removes the blocking global rule for that skill, whoever wrote it.",
   "",
+  "Every result is a JSON object, not Markdown: `schemaVersion`, `action`, `ok`, `warnings`, plus action-specific fields documented in the project README. Failures use `ok: false` with `error: { code, message }`.",
+  "",
   "Semantics: deny = hidden from the model-visible skill list AND loading via the `skill` tool is rejected (granularity = skill id). ask = stays listed, asks for confirmation when loaded. disable writes deny by default; pass effect:\"ask\" for a soft disable.",
   "`enable` deletes the one exact global rule for that id. It refuses when the rule cannot be uniquely identified (several matching rules) or when the blocker is a wildcard rule / an agent-level `agents.<id>.permissions` / a policy — those are only reported, never edited.",
   "Use when the user asks which skills are installed, why one is not available, or wants one turned off or on.",
@@ -1678,9 +1788,10 @@ export default {
         options: { codemode: false },
         description: DESCRIPTION,
         input: INPUT_SCHEMA,
+        output: OUTPUT_SCHEMA,
         async execute(raw, context) {
           const input = raw && typeof raw === "object" ? raw : {}
-          const action = input.action
+          const action = typeof input.action === "string" && input.action ? input.action : "unknown"
           const id = input.id ?? (typeof input.skill === "string" ? input.skill : undefined)
           const name = input.name
           const effect = input.effect
@@ -1689,20 +1800,18 @@ export default {
           try {
             switch (action) {
               case "list":
-                return { content: await actList(scoped) }
+                return wrap(await actList(scoped))
               case "inspect":
-                return { content: await actInspect(scoped, id, name) }
+                return wrap(await actInspect(scoped, id, name))
               case "disable":
-                return { content: await actDisable(scoped, id, name, effect, dryRun) }
+                return wrap(await actDisable(scoped, id, name, effect, dryRun))
               case "enable":
-                return { content: await actEnable(scoped, id, name, dryRun) }
+                return wrap(await actEnable(scoped, id, name, dryRun))
               default:
-                return {
-                  content: `未知动作 \`${action ?? "(缺失)"}\`。可用：list / inspect / disable / enable。`,
-                }
+                return wrap(failResult(action, "unknown_action", `未知动作 \`${input.action ?? "(缺失)"}\`。可用：list / inspect / disable / enable。`))
             }
           } catch (err) {
-            return { content: `❌ ${PLUGIN_ID} 执行失败：${err && err.message ? err.message : String(err)}` }
+            return wrap(failResult(action, "internal_error", `${PLUGIN_ID} 执行失败：${err && err.message ? err.message : String(err)}`))
           }
         },
       })

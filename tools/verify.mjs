@@ -543,7 +543,8 @@ async function callWith(opts, action, args = {}) {
   await mod.default.setup(ctx)
   const tool = ctx.__tools.find((t) => t.name === "skill_management")
   const res = await tool.execute({ action, ...args }, { agent: opts.callerAgentId ?? "build", sessionID: "test" })
-  return { text: res.content, ctx }
+  // 工具返回 { output, content }：output 供宿主按 schema 校验，content 是模型读到的 JSON 文本
+  return { text: res.content, json: res.output, res, ctx }
 }
 
 async function call(action, args = {}) {
@@ -552,41 +553,79 @@ async function call(action, args = {}) {
 
 {
   // 工具注册形态
-  const { text: _t, ctx: _c } = await callWith({}, "list")
+  const { ctx: _c } = await callWith({}, "list")
   const tool = _c.__tools.find((t) => t.name === "skill_management")
   ok("工具已注册且名为 skill_management", Boolean(tool))
   ok("options.codemode === false", tool.options && tool.options.codemode === false, JSON.stringify(tool.options))
   ok("input 是原生 JSON Schema（含 type:object）", tool.input && tool.input.type === "object")
   ok("input 不是 zod/函数（确实传了原生 JSON Schema）", typeof tool.input !== "function")
+  ok(
+    "声明了 output JSON Schema（不声明就不能返回 output）",
+    tool.output && tool.output.type === "object" && Array.isArray(tool.output.required) && tool.output.required.includes("schemaVersion"),
+    JSON.stringify(tool.output?.required),
+  )
   ok("description 非空", typeof tool.description === "string" && tool.description.length > 40)
+  ok("description 声明返回 JSON、不是 Markdown", /JSON object/i.test(tool.description) && /not Markdown/i.test(tool.description), tool.description)
   ok("读取注册表后会 dispose 掉 transform 注册（不留 hook）", _c.__stats.disposed >= 2, `disposed=${_c.__stats.disposed}`)
+
+  // 返回形态：content 必须是可解析的 JSON，且与 output 一致
+  {
+    const r = await call("list")
+    let parsed = null
+    try {
+      parsed = JSON.parse(r.text)
+    } catch {
+      parsed = null
+    }
+    ok("content 是合法 JSON（不再是 Markdown）", parsed !== null, r.text.slice(0, 200))
+    ok("content 与 output 是同一份数据", parsed !== null && JSON.stringify(parsed) === JSON.stringify(r.json))
+    ok(
+      "每个结果都带 schemaVersion/action/ok/warnings",
+      parsed && parsed.schemaVersion === 1 && parsed.action === "list" && parsed.ok === true && Array.isArray(parsed.warnings),
+      JSON.stringify(parsed && Object.keys(parsed)),
+    )
+    ok("JSON 里没有 Markdown 表格分隔行", !r.text.includes("| ---") && !r.text.includes("|---"))
+  }
+
+  // 未知动作与内部错误也必须是合法 JSON（声明 output 后，字符串返回值会变成宿主错误）
+  {
+    const r = await call("nope")
+    ok("未知动作返回 ok:false + error.code", r.json.ok === false && r.json.error.code === "unknown_action", r.text)
+    ok("未知动作仍是合法 JSON", JSON.parse(r.text).action === "nope")
+  }
 
   // 宿主形状兼容：只有 list() 信封 / 只有 list() 数组 / transform 可用
   {
     const env = await callWith({ envelopeOnly: true }, "list")
-    ok("transform 不可用时，回退读 list() 的 { location, data } 信封", env.text.includes("grill-me") && !env.text.includes("❌"))
+    ok("transform 不可用时，回退读 list() 的 { location, data } 信封", env.json.skills.some((s) => s.id === "grill-me") && env.json.ok === true)
     const arr = await callWith({ arrayOnly: true }, "list")
-    ok("list() 直接返回数组时也能读", arr.text.includes("grill-me"))
+    ok("list() 直接返回数组时也能读", arr.json.skills.some((s) => s.id === "grill-me"))
   }
 
   // list
-  const list = (await call("list")).text
-  ok("list 含表头列 id/source/scope/state/path", /id/.test(list) && /source/.test(list) && /scope/.test(list) && /state/.test(list) && /path/.test(list))
-  ok("list 覆盖全部 5 个 skill", ["grill-me", "windows-shell", "agents-skill", "cached-skill", "builtin-one"].every((id) => list.includes(id)))
+  const listRes = await call("list")
+  const list = listRes.json
+  const ids = list.skills.map((s) => s.id)
+  ok(
+    "list 每个条目都带 id/name/autoinvoke/source/scope/state/path/description",
+    list.skills.every((s) => ["id", "name", "autoinvoke", "source", "scope", "state", "path", "description"].every((k) => k in s)),
+    JSON.stringify(list.skills[0]),
+  )
+  ok("list 覆盖全部 5 个 skill", ["grill-me", "windows-shell", "agents-skill", "cached-skill", "builtin-one"].every((id) => ids.includes(id)))
   ok(
     "list 正确标出来源（claude / config / agents / catalog / embedded）",
-    ["claude", "config", "agents", "catalog", "embedded"].every((s) => list.includes(`| ${s} |`)),
-    list,
+    ["claude", "config", "agents", "catalog", "embedded"].every((s) => list.skills.some((x) => x.source === s)),
+    JSON.stringify(list.skills.map((s) => `${s.id}=${s.source}`)),
   )
-  ok("list 绝不输出正文", !list.includes(SENTINEL))
-  ok("list description 只取首行", list.includes("Stress-test a plan") && !list.includes("second line"))
-  ok("list 带统计行", /发现 5 个、已禁用 0 个、ask 0 个/.test(list))
-  ok("list 打印目标配置文件路径", list.includes(CFG))
-  ok("list 标明调用者 agent（state 列的作用域）", list.includes("调用者 agent：`build`"), list)
+  ok("list 绝不输出正文", !listRes.text.includes(SENTINEL))
+  ok("list description 只取首行", list.skills.find((s) => s.id === "grill-me").description === "Stress-test a plan")
+  ok("list 带统计", list.summary.total === 5 && list.summary.disabled === 0 && list.summary.ask === 0, JSON.stringify(list.summary))
+  ok("list 打印目标配置文件路径", list.config.file === CFG)
+  ok("list 标明调用者 agent（state 的作用域）", list.callerAgent.id === "build" && list.callerAgent.verified === true, JSON.stringify(list.callerAgent))
 
-  // 回归：list 的 state 列只看调用者 agent 的规则集（规范 §3.6），不得合并所有 agent
+  // 回归：list 的 state 只看调用者 agent 的规则集（规范 §3.6），不得合并所有 agent
   {
-    const { text: t, ctx: c } = await callWith({ withTitleDeny: true }, "list")
+    const { json: t, ctx: c } = await callWith({ withTitleDeny: true }, "list")
     const items = (await c.agent.list()).data
     const title = items.find((a) => a.id === "title")
     const own = title && Array.isArray(title.permissions) ? title.permissions : []
@@ -595,49 +634,72 @@ async function call(action, args = {}) {
       Boolean(title) && own.length > 0 && own[own.length - 1].effect === "deny",
       JSON.stringify(own),
     )
-    ok("别的 agent 全 deny 不影响调用者：统计仍是 0 disabled", /发现 5 个、已禁用 0 个、ask 0 个/.test(t), t)
-    ok("别的 agent 全 deny 时 state 列仍全是 available", (t.match(/\| available \|/g) ?? []).length === 5, t)
-    ok("提示其它 agent 下的差异", t.includes("另有 5 个 skill 在其它 agent 下状态不同"), t)
+    ok("别的 agent 全 deny 不影响调用者：统计仍是 0 disabled", t.summary.disabled === 0, JSON.stringify(t.summary))
+    ok("别的 agent 全 deny 时 state 仍全是 available", t.skills.every((s) => s.state === "available"), JSON.stringify(t.skills.map((s) => s.state)))
+    ok(
+      "提示其它 agent 下的差异",
+      t.summary.diverged === 5 && t.warnings.some((w) => w.includes("另有 5 个 skill 在其它 agent 下状态不同")),
+      JSON.stringify(t.summary),
+    )
   }
   {
     // 本机真实 bug 的最小复现：只有别的 agent（plan）deny，调用者（build）不该看到 disabled
-    const t = (await callWith({ agentRules: { plan: [{ action: "skill", resource: "grill-me", effect: "deny" }] } }, "list")).text
-    ok("只有别的 agent deny 某个 id 时，调用者仍是 available", /已禁用 0 个/.test(t) && !/\| grill-me \|[^\n]*\| disabled \|/.test(t), t)
+    const t = (await callWith({ agentRules: { plan: [{ action: "skill", resource: "grill-me", effect: "deny" }] } }, "list")).json
+    ok(
+      "只有别的 agent deny 某个 id 时，调用者仍是 available",
+      t.summary.disabled === 0 && t.skills.find((s) => s.id === "grill-me").state !== "disabled",
+      JSON.stringify(t.summary),
+    )
   }
   {
     // 调用者自己的 deny 仍然算数
-    const t = (await callWith({ agentRules: { build: [{ action: "skill", resource: "grill-me", effect: "deny" }] } }, "list")).text
-    ok("调用者自己的 deny 仍然生效", /已禁用 1 个/.test(t) && /\| grill-me \|[^\n]*\| disabled \|/.test(t), t)
+    const t = (await callWith({ agentRules: { build: [{ action: "skill", resource: "grill-me", effect: "deny" }] } }, "list")).json
+    ok(
+      "调用者自己的 deny 仍然生效",
+      t.summary.disabled === 1 && t.skills.find((s) => s.id === "grill-me").state === "disabled",
+      JSON.stringify(t.summary),
+    )
   }
   {
-    const t = (await callWith({ callerAgentId: "ghost" }, "list")).text
-    ok("拿不到调用者 agent 时显式告警（不静默顶替）", t.includes("未能确认调用者 agent"), t)
+    const t = (await callWith({ callerAgentId: "ghost" }, "list")).json
+    ok(
+      "拿不到调用者 agent 时显式告警（不静默顶替）",
+      t.callerAgent.verified === false && t.warnings.some((w) => w.includes("未能确认调用者 agent")),
+      JSON.stringify(t.warnings),
+    )
   }
 
   // inspect
-  const insp = (await call("inspect", { id: "grill-me" })).text
-  ok("inspect 报告 id/path/source/scope", insp.includes("grill-me") && insp.includes("SKILL.md") && insp.includes("claude"))
-  ok("inspect 给出命中规则与逐 agent 结果", insp.includes("命中规则") && insp.includes("build"))
-  ok("inspect 给出一句话结论", /\*\*结论\*\*/.test(insp))
-  ok("inspect 不输出正文", !insp.includes(SENTINEL))
-  const inspByName = (await call("inspect", { name: "windows-shell" })).text
-  ok("inspect 支持 name 别名", inspByName.includes("按 name 别名匹配"))
+  const inspRes = await call("inspect", { id: "grill-me" })
+  const insp = inspRes.json
+  ok("inspect 报告 id/path/source/scope", insp.skill.id === "grill-me" && insp.skill.path.includes("SKILL.md") && insp.skill.source === "claude")
+  ok("inspect 给出命中规则与逐 agent 结果", insp.caller.rule !== null && insp.agents.some((a) => a.id === "build"))
+  ok("inspect 给出一句话结论", insp.conclusion.state === "available" && insp.conclusion.message.includes("当前可用"), insp.conclusion.message)
+  ok("inspect 不输出正文", !inspRes.text.includes(SENTINEL))
+  const inspByName = (await call("inspect", { name: "windows-shell" })).json
+  ok("inspect 支持 name 别名", inspByName.matchedBy === "name")
+  {
+    const missing = (await call("inspect", { id: "no-such-skill" })).json
+    ok("inspect 找不到时 ok:false + skill_not_found", missing.ok === false && missing.error.code === "skill_not_found", JSON.stringify(missing))
+  }
 
   // dryRun 不得改文件
   const before = fs.readFileSync(CFG)
-  const dry = (await call("disable", { id: "grill-me", dryRun: true })).text
-  ok("dryRun 输出计划", dry.includes("dryRun：未写入任何文件"))
+  const dry = (await call("disable", { id: "grill-me", dryRun: true })).json
+  ok("dryRun 输出计划且不写入", dry.dryRun === true && dry.changed === false && dry.message.includes("未写入任何文件"), JSON.stringify(dry))
   ok(
     "dryRun 预览与实际将插入的内容一致",
-    dry.includes(`"permissions": [`) && dry.includes(`{ "action": "skill", "resource": "grill-me", "effect": "deny" } // skill_management`),
-    dry,
+    dry.diff.join("\n").includes(`"permissions": [`) &&
+      dry.diff.join("\n").includes(`{ "action": "skill", "resource": "grill-me", "effect": "deny" } // skill_management`),
+    JSON.stringify(dry.diff),
   )
   ok("dryRun 零字节变化", fs.readFileSync(CFG).equals(before))
   ok("dryRun 不产生 sidecar", !fs.existsSync(path.join(tmpConfigDir, "skill_management.state.json")))
 
   // disable
-  const dis = (await call("disable", { id: "grill-me" })).text
-  ok("disable 成功", dis.includes("✅"))
+  const dis = (await call("disable", { id: "grill-me" })).json
+  ok("disable 成功", dis.ok === true && dis.changed === true, JSON.stringify(dis.error))
+  ok("disable 报告结构化 verification 与 diff", dis.verification.ok === true && dis.verification.caller === "build" && dis.diff.length > 0)
   const afterDisable = fs.readFileSync(CFG).toString("utf8")
   mod.strictValidate(afterDisable)
   ok("disable 后规则在文件里", afterDisable.includes('"resource": "grill-me", "effect": "deny"'))
@@ -655,17 +717,24 @@ async function call(action, args = {}) {
   ok("disable 后被求值为 deny", mod.stateOf([{ action: "*", resource: "*", effect: "allow" }, { action: "skill", resource: "grill-me", effect: "deny" }], "grill-me").effect === "deny")
 
   // 重复 disable
-  const dis2 = (await call("disable", { id: "grill-me" })).text
-  ok("重复 disable 不重复写", dis2.includes("已经是停用状态") && fs.readFileSync(CFG).toString("utf8") === afterDisable)
+  const dis2 = (await call("disable", { id: "grill-me" })).json
+  ok(
+    "重复 disable 不重复写",
+    dis2.ok === true && dis2.changed === false && dis2.reason === "already_disabled" && fs.readFileSync(CFG).toString("utf8") === afterDisable,
+    JSON.stringify(dis2),
+  )
 
   // list 现在应显示 disabled
-  const list2 = (await call("list")).text
-  ok("list 显示 disabled 计数", /已禁用 1 个/.test(list2))
-  ok("list 的 state 列用 available/disabled（不是 allow/deny）", /\| disabled \|/.test(list2) && /\| available \|/.test(list2), list2)
+  const list2 = (await call("list")).json
+  ok("list 显示 disabled 计数", list2.summary.disabled === 1, JSON.stringify(list2.summary))
+  ok(
+    "list 的 state 用 available/disabled（不是 allow/deny）",
+    list2.skills.find((s) => s.id === "grill-me").state === "disabled" && list2.skills.find((s) => s.id === "windows-shell").state === "available",
+  )
 
   // enable
-  const en = (await call("enable", { id: "grill-me" })).text
-  ok("enable 成功", en.includes("✅"))
+  const en = (await call("enable", { id: "grill-me" })).json
+  ok("enable 成功", en.ok === true && en.changed === true, JSON.stringify(en.error))
   ok("enable 后逐字节还原", fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")))
   const side2 = JSON.parse(fs.readFileSync(path.join(tmpConfigDir, "skill_management.state.json"), "utf8"))
   ok("enable 后 sidecar 记录被移除", side2.rules.length === 0)
@@ -674,18 +743,22 @@ async function call(action, args = {}) {
   {
     cfgsWrite(ORIGINAL)
     const r = await callWith({ withTitleDeny: true }, "disable", { id: "windows-shell" })
-    ok("不同 agent 的全 deny 不影响调用者（不会被误判为'已被更宽规则覆盖'）", r.text.includes("✅"), r.text)
+    ok("不同 agent 的全 deny 不影响调用者（不会被误判为'已被更宽规则覆盖'）", r.json.ok === true && r.json.changed === true, r.text)
     mod.strictValidate(fs.readFileSync(CFG).toString("utf8"))
     // 清理：撤销
     const back = await callWith({ withTitleDeny: true }, "enable", { id: "windows-shell" })
-    ok("清理后还原", back.text.includes("✅") && fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")))
+    ok("清理后还原", back.json.ok === true && fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")), back.text)
   }
 
   // 调用者自己确实被更宽规则覆盖为 deny → 报覆盖、不写入
   {
     cfgsWrite('{\n  "permissions": [\n    { "action": "skill", "resource": "*", "effect": "deny" }\n  ]\n}\n')
     const r = await call("disable", { id: "windows-shell" })
-    ok("调用者自己被更宽规则覆盖时报告覆盖，不写入", r.text.includes("已被更宽的规则覆盖"), r.text)
+    ok(
+      "调用者自己被更宽规则覆盖时报告覆盖，不写入",
+      r.json.ok === true && r.json.changed === false && r.json.reason === "covered_by_broader_rule" && r.json.message.includes("已被更宽的规则覆盖"),
+      r.text,
+    )
     ok("该情形下文件未变", fs.readFileSync(CFG).toString("utf8").includes('"resource": "*"'))
   }
 
@@ -695,13 +768,21 @@ async function call(action, args = {}) {
     cfgsWrite(ORIGINAL)
     const before = fs.readFileSync(CFG)
     const r = await callWith({ staleAgents: true }, "disable", { id: "windows-shell" })
-    ok("N4 deny 生效校验失败时报告失败并回滚", r.text.includes("回读校验失败") && r.text.includes("已回滚"), r.text)
+    ok(
+      "N4 deny 生效校验失败时报告失败并回滚",
+      r.json.ok === false && r.json.error.code === "verification_failed" && r.json.rolledBack === true && r.json.error.message.includes("已回滚"),
+      r.text,
+    )
     ok("N4 回滚后文件逐字节不变", fs.readFileSync(CFG).equals(before))
     ok(
       "N4 回滚后不写 sidecar 记录",
       !JSON.parse(fs.readFileSync(path.join(tmpConfigDir, "skill_management.state.json"), "utf8")).rules.some((r) => r.id === "windows-shell"),
     )
-    ok("N4 回滚时说明调用者规则集里实际命中的是哪一条", r.text.includes("的规则集 rules[") || r.text.includes("没有命中规则"), r.text)
+    ok(
+      "N4 回滚时说明调用者规则集里实际命中的是哪一条",
+      r.json.warnings.join("\n").includes("的规则集 rules[") || r.json.warnings.join("\n").includes("没有命中规则"),
+      JSON.stringify(r.json.warnings),
+    )
     delete process.env.SKILL_MGMT_VERIFY_TIMEOUT_MS
   }
 
@@ -714,8 +795,12 @@ async function call(action, args = {}) {
     mod.saveSidecar(tmpConfigDir, { rules: [] })
     const before = fs.readFileSync(CFG)
     const r = await callWith({ staleAgents: true }, "disable", { id: "windows-shell", effect: "ask" })
-    ok("N1 ask 回读校验不得空转（宿主没读进规则时必须失败）", r.text.includes("回读校验失败") && r.text.includes("已回滚"), r.text)
-    ok("N1 ask 失败时不谎报成功", !r.text.includes("✅"), r.text)
+    ok(
+      "N1 ask 回读校验不得空转（宿主没读进规则时必须失败）",
+      r.json.ok === false && r.json.error.code === "verification_failed" && r.json.error.message.includes("已回滚"),
+      r.text,
+    )
+    ok("N1 ask 失败时不谎报成功", r.json.ok === false, r.text)
     ok("N1 ask 失败后文件逐字节不变", fs.readFileSync(CFG).equals(before))
     ok(
       "N1 ask 失败后不写 sidecar 记录",
@@ -724,21 +809,21 @@ async function call(action, args = {}) {
     delete process.env.SKILL_MGMT_VERIFY_TIMEOUT_MS
   }
 
-  // N2 ask 正向：✅ + 配置里确实写 ask + sidecar 记 ask + 输出能自证条数 0→1
+  // N2 ask 正向：写入成功 + 配置里确实写 ask + sidecar 记 ask + 输出能自证条数 0→1
   {
     cfgsWrite(ORIGINAL)
     mod.saveSidecar(tmpConfigDir, { rules: [] })
     const r = await call("disable", { id: "windows-shell", effect: "ask" })
-    ok("N2 ask 成功", r.text.includes("✅"), r.text)
+    ok("N2 ask 成功", r.json.ok === true && r.json.changed === true, r.text)
     const written = fs.readFileSync(CFG, "utf8")
     ok("N2 配置里写入的是 effect: \"ask\"", written.includes('"resource": "windows-shell", "effect": "ask"'), written)
     const st = JSON.parse(fs.readFileSync(path.join(tmpConfigDir, "skill_management.state.json"), "utf8"))
     ok("N2 sidecar 记的是 ask", st.rules.find((x) => x.id === "windows-shell")?.effect === "ask", JSON.stringify(st))
-    ok("N2 输出含精确规则数 0→1（能自证读入）", r.text.includes("精确规则数 0→1"), r.text)
-    const l = (await call("list")).text
-    ok("N2 list 把该 skill 显示为 ask", /\| windows-shell \|[^\n]*\| ask \|/.test(l), l)
+    ok("N2 输出含精确规则数 0→1（能自证读入）", r.json.verification.via.includes("精确规则数 0→1"), JSON.stringify(r.json.verification))
+    const l = (await call("list")).json
+    ok("N2 list 把该 skill 显示为 ask", l.skills.find((s) => s.id === "windows-shell").state === "ask", JSON.stringify(l.skills.find((s) => s.id === "windows-shell")))
     const e = await call("enable", { id: "windows-shell" })
-    ok("N2 清理：enable 能删掉 ask 规则并逐字节还原", e.text.includes("✅") && fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")), e.text)
+    ok("N2 清理：enable 能删掉 ask 规则并逐字节还原", e.json.ok === true && fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")), e.text)
   }
 
   // N3 ask 但该 agent 有自己的后置 allow 规则：规则确实写入，输出必须写明实际生效是 allow
@@ -751,9 +836,9 @@ async function call(action, args = {}) {
       { id: "windows-shell", effect: "ask" },
     )
     ok("N3 规则确实写入了配置", fs.readFileSync(CFG, "utf8").includes('"resource": "windows-shell", "effect": "ask"'), fs.readFileSync(CFG, "utf8"))
-    ok("N3 仍报写入成功（回读确认条数增加）", r.text.includes("✅") && r.text.includes("精确规则数 0→1"), r.text)
-    ok("N3 必须显式说明实际效果是 allow（不谎报已生效）", r.text.includes("实际效果是 allow"), r.text)
-    ok("N3 不得再说「对该 agent 优先级最高」", !r.text.includes("对该 agent 优先级最高"), r.text)
+    ok("N3 仍报写入成功（回读确认条数增加）", r.json.ok === true && r.json.verification.via.includes("精确规则数 0→1"), r.text)
+    ok("N3 必须显式说明实际效果是 allow（不谎报已生效）", r.json.warnings.join("\n").includes("实际效果是 allow"), JSON.stringify(r.json.warnings))
+    ok("N3 不得再说「对该 agent 优先级最高」", !r.json.warnings.join("\n").includes("对该 agent 优先级最高"), JSON.stringify(r.json.warnings))
     cfgsWrite(ORIGINAL)
     mod.saveSidecar(tmpConfigDir, { rules: [] })
   }
@@ -774,7 +859,7 @@ async function call(action, args = {}) {
     fs.writeFileSync(CFG, originalBuf)
     mod.saveSidecar(tmpConfigDir, { rules: [] })
     const r = await call("disable", { id: "windows-shell" })
-    ok("N5 前置：disable 成功", r.text.includes("✅"), r.text)
+    ok("N5 前置：disable 成功", r.json.ok === true, r.text)
     const expected =
       "\ufeff" +
       text.replace(
@@ -787,7 +872,7 @@ async function call(action, args = {}) {
     ok("N5 BOM 仍在", actual[0] === 0xef && actual[1] === 0xbb && actual[2] === 0xbf)
     ok("N5 仍是全 CRLF", !/[^\r]\n/.test(actual.toString("utf8").slice(1)))
     const e = await call("enable", { id: "windows-shell" })
-    ok("N5 复原：enable 后逐字节回到原文件", e.text.includes("✅") && fs.readFileSync(CFG).equals(originalBuf), e.text)
+    ok("N5 复原：enable 后逐字节回到原文件", e.json.ok === true && fs.readFileSync(CFG).equals(originalBuf), e.text)
   }
 
   // N7 sidecar 损坏（非法 JSON / rules 非数组 / 未知 version）→ ok=false，list 不崩且给提示
@@ -804,8 +889,9 @@ async function call(action, args = {}) {
       fs.writeFileSync(sideFile, body, "utf8")
       const s = mod.loadSidecar(tmpConfigDir)
       ok(`N7 sidecar ${name} → ok=false（不猜）`, s.ok === false && s.rules.length === 0, JSON.stringify({ ok: s.ok, err: s.error }))
-      const l = (await call("list")).text
-      ok(`N7 sidecar ${name} → list 不崩且给出提示`, !l.includes("❌") && l.includes("sidecar") && l.includes("读取失败"), l.slice(-400))
+      const l = (await call("list")).json
+      const w = l.warnings.join("\n")
+      ok(`N7 sidecar ${name} → list 不崩且给出提示`, l.ok === true && w.includes("sidecar") && w.includes("读取失败"), JSON.stringify(l.warnings))
     }
     mod.saveSidecar(tmpConfigDir, { rules: [] })
   }
@@ -819,13 +905,17 @@ async function call(action, args = {}) {
     const d1 = await call("disable", { id: "windows-shell" })
     const fileAfterD1 = fs.readFileSync(CFG)
     const d2 = await call("disable", { id: "windows-shell" })
-    ok("N10 重复 disable 是空操作（文件不动）", d2.text.includes("已经是停用状态") && fs.readFileSync(CFG).equals(fileAfterD1), d2.text)
+    ok("N10 重复 disable 是空操作（文件不动）", d2.json.changed === false && fs.readFileSync(CFG).equals(fileAfterD1), d2.text)
     const e1 = await call("enable", { id: "windows-shell" })
     ok("N10 第一次 enable 逐字节复原", fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")), e1.text)
     const e2 = await call("enable", { id: "windows-shell" })
-    ok("N10 重复 enable 是空操作", fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")) && e2.text.includes("无需修改"), e2.text)
+    ok(
+      "N10 重复 enable 是空操作",
+      fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")) && e2.json.changed === false && e2.json.reason === "nothing_to_enable",
+      e2.text,
+    )
     ok("N10 sidecar 逐字节复原", fs.readFileSync(sideFile).equals(sideBefore), fs.readFileSync(sideFile, "utf8"))
-    ok("N10 前置：四步里的写操作都成功", d1.text.includes("✅") && e1.text.includes("✅"), `${d1.text}\n---\n${e1.text}`)
+    ok("N10 前置：四步里的写操作都成功", d1.json.ok === true && e1.json.ok === true, `${d1.text}\n---\n${e1.text}`)
   }
 
   // N8 配置极端形状里的一条：目标文档语法坏了 → enable 既不猜也不崩，并明确说"无法解析"
@@ -833,30 +923,32 @@ async function call(action, args = {}) {
     cfgsWrite('{\n  "permissions": [\n    { "action": "skill", "resource": "windows-shell", "effect": "deny" }\n  \n}\n')
     const before = fs.readFileSync(CFG)
     const r = await call("enable", { id: "windows-shell" })
-    ok("N8 目标文件语法错误：enable 不崩、不报成功", !r.text.includes("❌ skill_management 执行失败") && !r.text.includes("✅"), r.text)
-    ok("N8 目标文件语法错误：明确提示无法解析", r.text.includes("无法解析"), r.text)
+    ok("N8 目标文件语法错误：enable 不崩、不报成功", r.json.ok === false && r.json.error.code !== "internal_error", r.text)
+    ok("N8 目标文件语法错误：明确提示无法解析", r.json.warnings.join("\n").includes("无法解析"), JSON.stringify(r.json.warnings))
     ok("N8 目标文件语法错误：文件未被改动", fs.readFileSync(CFG).equals(before))
     cfgsWrite(ORIGINAL)
   }
 
   // §3.1/§4.4 一致性：sidecar 有记录但配置里已无对应规则 → 必须告警，且该 skill 显示为可用
-  {    cfgsWrite(ORIGINAL)
+  {
+    cfgsWrite(ORIGINAL)
     mod.saveSidecar(tmpConfigDir, {
       rules: [{ id: "windows-shell", effect: "deny", file: CFG, insertedAt: new Date().toISOString(), createdBlock: true }],
     })
-    const l = (await call("list")).text
-    ok("sidecar 与配置不一致时必须告警", l.includes("⚠️ sidecar 与配置不一致"), l)
-    ok("告警里点名了那个 skill", /sidecar 与配置不一致[\s\S]{0,300}windows-shell/.test(l))
-    ok("该 skill 仍按实际规则集显示为 available", /\| windows-shell \|[^\n]*\| available \|/.test(l), l)
-    ok("注册表漂移（情况 3）不再误报", !l.includes("已不在注册表里"))
+    const l = (await call("list")).json
+    const w = l.warnings.join("\n")
+    ok("sidecar 与配置不一致时必须告警", w.includes("⚠️ sidecar 与配置不一致"), w)
+    ok("告警里点名了那个 skill", /sidecar 与配置不一致[\s\S]{0,300}windows-shell/.test(w))
+    ok("该 skill 仍按实际规则集显示为 available", l.skills.find((s) => s.id === "windows-shell").state === "available")
+    ok("注册表漂移（情况 3）不再误报", !w.includes("已不在注册表里"))
     mod.saveSidecar(tmpConfigDir, { rules: [] })
   }
 
   // 反向漂移：配置里有 skill 规则但 sidecar 无记录 → 给提示
   {
     cfgsWrite('{\n  "permissions": [\n    { "action": "skill", "resource": "windows-shell", "effect": "deny" }\n  ]\n}\n')
-    const l = (await call("list")).text
-    ok("配置有规则而 sidecar 无记录时给出提示", l.includes("sidecar 里没有记录"), l)
+    const l = (await call("list")).json
+    ok("配置有规则而 sidecar 无记录时给出提示", l.warnings.join("\n").includes("sidecar 里没有记录"), JSON.stringify(l.warnings))
     cfgsWrite(ORIGINAL)
   }
 
@@ -867,26 +959,28 @@ async function call(action, args = {}) {
   const handWritten = cfgsWrite(
     '{\n  "permissions": [\n    { "action": "skill", "resource": "windows-shell", "effect": "deny" }\n  ]\n}\n',
   )
-  const refuse = (await call("enable", { id: "windows-shell" })).text
-  ok("拒绝删除用户手写的规则", refuse.includes("拒绝执行"), refuse)
-  ok("拒绝时给出待删规则原文", refuse.includes('"resource": "windows-shell"'))
+  const refuse = (await call("enable", { id: "windows-shell" })).json
+  ok("拒绝删除用户手写的规则", refuse.ok === false && refuse.error.code === "unverifiable_origin", JSON.stringify(refuse))
+  ok("拒绝时给出待删规则原文", refuse.rule.text.includes('"resource": "windows-shell"'), JSON.stringify(refuse.rule))
   ok("拒绝时未改文件", fs.readFileSync(CFG).toString("utf8") === handWritten)
 
   // sidecar 有记录但标记被外部剥掉 → 删除并告警
   fs.writeFileSync(CFG, '{\n  "permissions": [\n    { "action": "skill", "resource": "grill-me", "effect": "deny" }\n  ]\n}\n', "utf8")
   mod.saveSidecar(tmpConfigDir, { rules: [{ id: "grill-me", effect: "deny", file: CFG, insertedAt: new Date().toISOString() }] })
-  const en2 = (await call("enable", { id: "grill-me" })).text
-  ok("标记缺失时按 sidecar 删除", en2.includes("✅"))
-  ok("标记缺失时给出告警", en2.includes("⚠️"))
+  const en2 = (await call("enable", { id: "grill-me" })).json
+  ok("标记缺失时按 sidecar 删除", en2.ok === true)
+  ok("标记缺失时给出告警", en2.warnings.some((w) => w.includes("⚠️")), JSON.stringify(en2.warnings))
   mod.strictValidate(fs.readFileSync(CFG).toString("utf8"))
 
-  // 未声明 output：结果对象里不能出现 output 键
+  // 声明 output 后：结果必须带 output，且字段满足声明的必需项
   {
     const ctx = makeCtx()
     await mod.default.setup(ctx)
     const tool = ctx.__tools.find((t) => t.name === "skill_management")
     const res = await tool.execute({ action: "list" }, { agent: "build" })
-    ok("返回对象只含 content/metadata，不含 output", !("output" in res))
+    ok("声明了 output 时结果必须带 output（宿主规则）", "output" in res && res.output && typeof res.output === "object")
+    ok("output 满足声明的必需字段", ["schemaVersion", "action", "ok", "warnings"].every((k) => k in res.output), JSON.stringify(Object.keys(res.output)))
+    ok("content 是同一份 JSON", JSON.parse(res.content).schemaVersion === res.output.schemaVersion)
   }
 }
 
@@ -911,36 +1005,41 @@ section("F 反推 id（§3.5）与 enable 归属边界")
   ]
 
   // 直接对 normalizeSkill 的等价物做断言：用 list 的输出来看
-  const l = (await callWith({ skills: noId }, "list")).text
-  ok("§3.5 反推：<root>/foo.md → foo", /\| foo \|/.test(l), l)
-  ok("§3.5 反推：<root>/bar/SKILL.md → bar", /\| bar \|/.test(l))
-  ok("§3.5 反推：<root>/a/b/SKILL.md → b", /\| b \|/.test(l))
-  ok("location 字段（字符串）也被当作路径使用 → loc", /\| loc \|/.test(l))
-  ok("既无 id 也无路径 → 显示为 (unknown)", /\| \(unknown\) \|/.test(l))
-  ok("list 说明有几个 id 是反推来的", /其中 4 个 id 由路径反推/.test(l), l)
-  ok("反推得到的 id 也能查状态（不是 unknown）", /\| foo \|[^\n]*\| available \|/.test(l) || /\| foo \|[^\n]*\| disabled \|/.test(l), l)
+  const l = (await callWith({ skills: noId }, "list")).json
+  const lIds = l.skills.map((s) => s.id)
+  ok("§3.5 反推：<root>/foo.md → foo", lIds.includes("foo"), JSON.stringify(lIds))
+  ok("§3.5 反推：<root>/bar/SKILL.md → bar", lIds.includes("bar"))
+  ok("§3.5 反推：<root>/a/b/SKILL.md → b", lIds.includes("b"))
+  ok("location 字段（字符串）也被当作路径使用 → loc", lIds.includes("loc"))
+  ok("既无 id 也无路径 → id 为 null", l.skills.some((s) => s.id === null), JSON.stringify(lIds))
+  ok(
+    "list 说明有几个 id 是反推来的",
+    l.summary.derivedIds === 4 && l.warnings.some((w) => w.includes("其中 4 个 id 由路径反推")),
+    JSON.stringify(l.summary),
+  )
+  ok("反推得到的 id 也能查状态（不是 unknown）", ["available", "disabled", "ask"].includes(l.skills.find((s) => s.id === "foo").state))
 
   // inspect 要报告"反推过程"
-  const insp = (await callWith({ skills: noId }, "inspect", { id: "b" })).text
-  ok("inspect：报告 id 来源为「由路径反推」", insp.includes("由路径反推"), insp.slice(0, 1200))
-  ok("inspect：给出推导规则原文（SKILL.md → 取所在目录名）", insp.includes("取 SKILL.md 所在目录名"))
-  ok("inspect：给出规则输入 dirname/basename", insp.includes("规则输入") && insp.includes("SKILL.md"))
-  const inspLoc = (await callWith({ skills: noId }, "inspect", { id: "loc" })).text
-  ok("inspect：报告使用的路径字段是 location", inspLoc.includes("`location`"))
+  const insp = (await callWith({ skills: noId }, "inspect", { id: "b" })).json
+  ok("inspect：报告 id 来源为「由路径反推」", insp.idDerivation.idSource === "derived" && insp.idDerivation.explained.includes("由路径反推"), JSON.stringify(insp.idDerivation))
+  ok("inspect：给出推导规则原文（SKILL.md → 取所在目录名）", insp.idDerivation.rule.includes("取 SKILL.md 所在目录名"), insp.idDerivation.rule)
+  ok("inspect：给出规则输入 dirname/basename", Boolean(insp.idDerivation.dir) && insp.idDerivation.base === "SKILL.md", JSON.stringify(insp.idDerivation))
+  const inspLoc = (await callWith({ skills: noId }, "inspect", { id: "loc" })).json
+  ok("inspect：报告使用的路径字段是 location", inspLoc.idDerivation.pathField === "location", JSON.stringify(inspLoc.idDerivation))
 
   // 注册表自带 id 时不出现在"反推"计数里
-  const l2 = (await call("list")).text
-  ok("注册表自带 id 时不显示反推计数", !l2.includes("由路径反推"), l2)
+  const l2 = (await call("list")).json
+  ok("注册表自带 id 时不显示反推计数", l2.summary.derivedIds === 0 && !l2.warnings.join("\n").includes("由路径反推"), JSON.stringify(l2.summary))
 
   // §11.1：sidecar 丢失但标记还在 → **应当删除成功**（标记是文件内自证，优先于 sidecar）
   {
     cfgsWrite(ORIGINAL)
     const d = await call("disable", { id: "windows-shell" })
-    ok("前置：disable 成功（带标记）", d.text.includes("✅"), d.text)
+    ok("前置：disable 成功（带标记）", d.json.ok === true, d.text)
     mod.saveSidecar(tmpConfigDir, { rules: [] }) // 模拟 sidecar 丢失
     const e = await call("enable", { id: "windows-shell" })
-    ok("sidecar 无记录但标记命中 → 删除成功（§11.1 新行为）", e.text.includes("✅"), e.text)
-    ok("定位方式报告为标记注释", e.text.includes("标记注释"), e.text)
+    ok("sidecar 无记录但标记命中 → 删除成功（§11.1 新行为）", e.json.ok === true, e.text)
+    ok("定位方式报告为标记注释", e.json.location.how === "marker" && e.json.location.origin.includes("标记注释"), JSON.stringify(e.json.location))
     ok("删除后逐字节还原", fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")), fs.readFileSync(CFG).toString("utf8"))
     mod.saveSidecar(tmpConfigDir, { rules: [] })
   }
@@ -957,12 +1056,16 @@ section("G §11 变更（enable 放宽 · 备份 1 份 + 原子写 · descriptio
   // (a) 标记命中 → 删；成功输出必须报告来源与删除后的生效效果
   cfgsWrite(ORIGINAL)
   const d1 = await call("disable", { id: "windows-shell" })
-  ok("G 前置：disable 成功", d1.text.includes("✅"), d1.text)
+  ok("G 前置：disable 成功", d1.json.ok === true && d1.json.changed === true, d1.text)
   ok("G 原子写不留下 .tmp 文件", !fs.existsSync(`${CFG}.tmp`), `${CFG}.tmp`)
   const e1 = await call("enable", { id: "windows-shell" })
-  ok("G(a) 标记命中即删除", e1.text.includes("✅") && fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")), e1.text)
-  ok("G(a) 报告被删规则的来源", /被删规则的来源：本工具写入/.test(e1.text), e1.text)
-  ok("G(a) 报告删除后的生效效果（调用者 agent）", /删除后的生效效果[\s\S]*`build`[\s\S]*allow/.test(e1.text), e1.text)
+  ok("G(a) 标记命中即删除", e1.json.ok === true && fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")), e1.text)
+  ok("G(a) 报告被删规则的来源", e1.json.location.origin.includes("本工具写入"), JSON.stringify(e1.json.location))
+  ok(
+    "G(a) 报告删除后的生效效果（调用者 agent）",
+    e1.json.verification.caller === "build" && e1.json.verification.effect === "allow",
+    JSON.stringify(e1.json.verification),
+  )
   ok("G 备份只保留 1 份（MAX_BACKUPS=1）", backupCount() === 1, `实际 ${backupCount()} 份：${fs.existsSync(backupsDir) ? fs.readdirSync(backupsDir).join(", ") : "(无)"}`)
 
   // 再写两次，备份仍只 1 份
@@ -977,9 +1080,9 @@ section("G §11 变更（enable 放宽 · 备份 1 份 + 原子写 · descriptio
     mod.saveSidecar(tmpConfigDir, { rules: [] })
     const before = fs.readFileSync(CFG)
     const r = await call("enable", { id: "windows-shell" })
-    ok("G(c) 无标记且无 sidecar → 拒绝执行", r.text.includes("拒绝执行"), r.text)
-    ok("G(c) 拒绝理由点明两者都没有", r.text.includes("既没有本工具标记注释") && r.text.includes("sidecar"), r.text)
-    ok("G(c) 给出该 id 规则原文", r.text.includes('"resource": "windows-shell"'), r.text)
+    ok("G(c) 无标记且无 sidecar → 拒绝执行", r.json.ok === false && r.json.error.code === "unverifiable_origin", r.text)
+    ok("G(c) 拒绝理由点明两者都没有", r.json.error.message.includes("既没有本工具标记注释") && r.json.error.message.includes("sidecar"), r.json.error.message)
+    ok("G(c) 给出该 id 规则原文", r.json.rule.text.includes('"resource": "windows-shell"'), JSON.stringify(r.json.rule))
     ok("G(c) 拒绝时不动文件", fs.readFileSync(CFG).equals(before))
   }
 
@@ -990,9 +1093,9 @@ section("G §11 变更（enable 放宽 · 备份 1 份 + 原子写 · descriptio
       rules: [{ id: "windows-shell", effect: "deny", file: CFG, insertedAt: new Date().toISOString(), createdBlock: true }],
     })
     const r = await call("enable", { id: "windows-shell" })
-    ok("G(b) 无标记 + sidecar 唯一匹配 → 删除成功", r.text.includes("✅"), r.text)
-    ok("G(b) 删除时告警", r.text.includes("⚠️"), r.text)
-    ok("G(b) 来源标注为 sidecar 记录", r.text.includes("sidecar 记录"), r.text)
+    ok("G(b) 无标记 + sidecar 唯一匹配 → 删除成功", r.json.ok === true && r.json.changed === true, r.text)
+    ok("G(b) 删除时告警", r.json.warnings.some((w) => w.includes("⚠️")), JSON.stringify(r.json.warnings))
+    ok("G(b) 来源标注为 sidecar 记录", r.json.location.how === "sidecar" && r.json.location.origin.includes("sidecar 记录"), JSON.stringify(r.json.location))
   }
 
   // 歧义：同一 id 两条精确规则 → 拒绝并列出全部候选
@@ -1006,8 +1109,12 @@ section("G §11 变更（enable 放宽 · 备份 1 份 + 原子写 · descriptio
     mod.saveSidecar(tmpConfigDir, { rules: [{ id: "windows-shell", effect: "deny", file: CFG, insertedAt: new Date().toISOString() }] })
     const before = fs.readFileSync(CFG)
     const r = await call("enable", { id: "windows-shell" })
-    ok("G 歧义（同 id 两条）→ 拒绝执行", r.text.includes("拒绝执行") && r.text.includes("无法唯一定位"), r.text)
-    ok("G 歧义 → 列出全部候选（两条原文）", (r.text.match(/"resource": "windows-shell"/g) || []).length === 2, r.text)
+    ok("G 歧义（同 id 两条）→ 拒绝执行", r.json.ok === false && r.json.error.code === "ambiguous_rule" && r.json.error.message.includes("无法唯一定位"), r.text)
+    ok(
+      "G 歧义 → 列出全部候选（两条原文）",
+      Array.isArray(r.json.candidates) && r.json.candidates.length === 2 && r.json.candidates.every((c) => c.text.includes('"resource": "windows-shell"')),
+      JSON.stringify(r.json.candidates),
+    )
     ok("G 歧义 → 不动文件", fs.readFileSync(CFG).equals(before))
   }
 
@@ -1016,8 +1123,8 @@ section("G §11 变更（enable 放宽 · 备份 1 份 + 原子写 · descriptio
     cfgsWrite('{\n  "permissions": [\n    { "action": "skill", "resource": "*", "effect": "deny" }\n  ]\n}\n')
     mod.saveSidecar(tmpConfigDir, { rules: [] })
     const r = await call("enable", { id: "windows-shell" })
-    ok("G 通配 deny → 拒绝删除", r.text.includes("拒绝执行") && r.text.includes("挡路的不是这一行"), r.text)
-    ok("G 通配 deny → 指出命中的规则原文", r.text.includes('"resource": "*"'), r.text)
+    ok("G 通配 deny → 拒绝删除", r.json.ok === false && r.json.error.code === "no_matching_rule", r.text)
+    ok("G 通配 deny → 指出命中的规则原文", r.json.relatedRules.some((x) => x.text.includes('"resource": "*"')), JSON.stringify(r.json.relatedRules))
     ok("G 通配 deny → 不动文件", fs.readFileSync(CFG).toString("utf8").includes('"resource": "*"'))
   }
 
@@ -1030,8 +1137,8 @@ section("G §11 变更（enable 放宽 · 备份 1 份 + 原子写 · descriptio
       "enable",
       { id: "windows-shell" },
     )
-    ok("G agent 级 deny → 拒绝删除", r.text.includes("拒绝执行") && r.text.includes("挡路的不是这一行"), r.text)
-    ok("G agent 级 deny → 指出调用者与规则", r.text.includes("`build`") && /"resource"\s*:\s*"windows-shell"/.test(r.text), r.text)
+    ok("G agent 级 deny → 拒绝删除", r.json.ok === false && r.json.error.code === "no_matching_rule", r.text)
+    ok("G agent 级 deny → 指出调用者与规则", r.json.callerHit.includes("`build`") && /"resource"\s*:\s*"windows-shell"/.test(r.json.callerHit), r.json.callerHit)
     ok("G agent 级 deny → 不动文件", fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")))
   }
 
@@ -1045,8 +1152,12 @@ section("G §11 变更（enable 放宽 · 备份 1 份 + 原子写 · descriptio
     )
     mod.saveSidecar(tmpConfigDir, { rules: [] })
     const r = await call("enable", { id: "windows-shell" })
-    ok("G 删除成功但仍是 deny：仍报告 ✅ 删除", r.text.includes("✅"), r.text)
-    ok("G 删除成功但仍是 deny：写明仍为 deny 及原因", /删除后的生效效果[\s\S]*deny[\s\S]*仍为 deny[\s\S]*"resource"\s*:\s*"\*"/.test(r.text), r.text)
+    ok("G 删除成功但仍是 deny：仍报告成功", r.json.ok === true && r.json.changed === true, r.text)
+    ok(
+      "G 删除成功但仍是 deny：写明仍为 deny 及原因",
+      r.json.verification.effect === "deny" && r.json.warnings.some((w) => w.includes("仍为 deny") && /"resource"\s*:\s*"\*"/.test(w)),
+      JSON.stringify(r.json.warnings),
+    )
     ok("G 删除成功但仍是 deny：目标规则确实被删", !fs.readFileSync(CFG).toString("utf8").includes('"resource": "windows-shell"'))
   }
 
@@ -1096,10 +1207,10 @@ section("H 性能闸门（软阈值，防回退）")
     const t0 = process.hrtime.bigint()
     const res = await tool.execute({ action: "list" }, { agent: "agent-1" })
     runs.push(Number(process.hrtime.bigint() - t0) / 1e6)
-    if (i === 0) first = res.content
+    if (i === 0) first = res.output
   }
-  ok("N12 合成注册表下 list 正常返回", first.includes("perf-skill-0") && !first.includes("❌"), first.slice(0, 300))
-  ok("N12 list 覆盖全部 29 个合成 skill", (first.match(/\| perf-skill-\d+ \|/g) ?? []).length === 29, String((first.match(/\| perf-skill-\d+ \|/g) ?? []).length))
+  ok("N12 合成注册表下 list 正常返回", first.ok === true && first.skills.length === 29, JSON.stringify(first.summary))
+  ok("N12 list 覆盖全部 29 个合成 skill", first.skills.filter((s) => /^perf-skill-\d+$/.test(s.id)).length === 29)
   const best = Math.min(...runs)
   // 实测基线约 3.5–4 ms（改造前 5.96 ms）；阈值放到 25 ms，避免 CI 抖动误报。
   ok(
