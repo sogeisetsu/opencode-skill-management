@@ -43,9 +43,10 @@ OpenCode 把 skill 权限当作规则列表求值，后匹配者胜，支持 glo
 | 无命中回退 `ask` | `ask` 可能是「显式软停用」，也可能是「一条规则都没命中」；`inspect` 会区分 |
 | 只写全局配置 | 项目级配置、`policies`、agent 级规则只报告，不修改 |
 
-:::note[输出语言]
-1.0.0 中工具自身的消息与表头是中文。字段值、规则 JSON 与路径是字面量；本系列页面描述的
-结构才是稳定契约。
+:::note[输出格式]
+每个动作返回一个 JSON 对象：`schemaVersion`、`action`、`ok`、`warnings`，加上本系列页面写明
+的动作字段。1.1.0 中 `warnings`、`message`、`conclusion.message`、`error.message` 里的人类
+可读文字是中文；字段名与字面量是稳定契约。
 :::
 
 ## 第一次使用
@@ -60,7 +61,7 @@ skill_management({ action: "disable", id: "windows-shell" })
 skill_management({ action: "enable",  id: "windows-shell" })
 ```
 
-`list` 只读，任何时刻都可以跑。两个写动作加 `dryRun` 时只打印将要增删的原文，不落盘。
+`list` 只读，任何时刻都可以跑。两个写动作加 `dryRun` 时只在 `diff` 里返回将要增删的原文，不落盘。
 
 ## 它不会做什么
 
