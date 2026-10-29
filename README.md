@@ -60,33 +60,80 @@
 
 ## 安装
 
-**首选：git spec（无注册表、无 token）**
-
-```pwsh
-opencode plugin add github:sogeisetsu/opencode-skill-management
-```
-
-**第二通道：npm**
+### 最小安装（npm，一条命令）
 
 ```pwsh
 opencode plugin add opencode-skill-management
 ```
 
-**兜底：直接放进插件目录**
+这条命令做两件事：从 npm 装上包，并把 `opencode-skill-management` 写进全局 `opencode.json(c)` 的 `plugins` 数组。**不需要**再往 `<config>/plugins/` 里放文件。想固定版本就写全版本号：
+
+```pwsh
+opencode plugin add opencode-skill-management@1.0.0
+```
+
+装完在**新进程**里确认（旧进程可能还挂着上一份）：
+
+```pwsh
+opencode plugin list --builtin
+# skill_management   1.0.0   opencode-skill-management@1.0.0
+```
+
+看到 `SOURCE` 是 `opencode-skill-management@1.0.0` 就说明走的是 npm 包。宿主会把包解到自己的缓存目录再加载（本机示例：`~/.cache/opencode/npm/opencode-skill-management@1.0.0/<hash>/node_modules/opencode-skill-management/`），这个位置由宿主管理，不要手改。
+
+### 其它安装方式
+
+**git spec（不经过 npm 注册表，也不需要 token）**
+
+```pwsh
+opencode plugin add github:sogeisetsu/opencode-skill-management
+```
+
+**离线：单文件直接放进插件目录**
 
 ```pwsh
 node tools/install.mjs          # 复制到 <config>/plugins/skill_management.js
 node tools/install.mjs --dry-run
 ```
 
-宿主会自动加载 `<config>/plugins/*.js`，不需要在配置里登记。确认装上了：
+宿主会自动加载 `<config>/plugins/*.js`，不需要在配置里登记；列表里显示为 `local` 加文件路径：
 
 ```pwsh
 opencode plugin list --builtin
 # skill_management   local   C:\Users\suyue\.config\opencode\plugins\skill_management.js
 ```
 
-> 注意必须带 `--builtin`：不带时本地目录插件不会出现在列表里，会显示 `No plugins found`。在全新的配置目录里，前两次调用可能为空，重试一次即可。
+> 必须带 `--builtin`：不带时自动发现的本地文件插件不会出现在列表里，会显示 `No plugins found`。
+
+### 不要装两份
+
+同一份插件只能有一种来源。npm 包和 `<config>/plugins/skill_management.js` 同时存在时，`plugin list` 会出现两行 `skill_management`，两者注册同名工具，后加载的覆盖前者——能用，但排查问题时很容易看错版本。切换方式时先删掉旧的那一份。
+
+## npm 包内容
+
+`npm pack` 产物（也就是 `opencode plugin add` 拿到的东西）只有 5 个文件，不含测试、文档站和 CI：
+
+```text
+opencode-skill-management-1.0.0.tgz
+├── package.json                # 包元数据；exports 指向 src/skill_management.js，files 只含 src 与 CHANGELOG
+├── README.md                   # 本文件，随包发布
+├── CHANGELOG.md                # 版本变更
+├── LICENSE                     # MIT
+└── src/
+    └── skill_management.js     # 插件本体：单文件，仅用 node:fs / node:path / node:os，无第三方依赖
+```
+
+仓库里有、但**不进包**的部分：
+
+```text
+tools/            # verify.mjs（248 项断言）、install.mjs（离线安装）、linux-verify.sh
+docs/             # 宿主实测（preflight.md）与验收证据（acceptance.md）
+site/             # Astro + Starlight 文档站，单独部署
+.github/          # CI 与发布 workflow
+.openchamber/     # 设计规范
+```
+
+插件本体只有一个文件，是因为宿主会把 `<config>/plugins/` 下的每个 `.js` / `.ts` 文件和子目录都当插件加载——拆出辅助模块会被当成第二个插件。
 
 ## 用法
 
