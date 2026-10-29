@@ -247,3 +247,52 @@ bash tools/linux-verify.sh        # 自带 Node + opencode 安装、临时 HOME�
 # == 4) skill_management  local  …/plugins/skill_management.js
 # == 5) 真实家目录与跑前一致
 ```
+
+---
+
+## 7. 工具 `output` schema：声明、校验与 content 回退（1.1.0，已证实）
+
+宿主 2.0.32 的工具运行时（从 `opencode.exe` 的内联代码读到，并用下面两条真实调用复验）：
+
+```js
+// 注册：input 与 output 都按 JSON Schema 转成内部 schema
+{ type: "tool", name, description, inputSchema: Wu(e.input),
+  ...(e.output === void 0 ? {} : { outputSchema: Ku(e.output) }) }
+
+// 执行：声明了 output 就必须返回它；没声明就不能返回
+if (e.output === void 0) {
+  if ("output" in a) fail("Tool result declared output without an output schema")
+  return { content: On(a.content) }
+}
+if (!("output" in a)) fail("Tool did not return its declared output")
+const output = Ju(e.output, a.output)          // 按 output schema 校验
+return { output, content: On(a.content, output) }
+
+// On(content, output)：content 是字符串就用它；否则回退到 JSON.stringify(output)
+```
+
+结论：
+
+- `output` 与 `input` 一样是原生 JSON Schema。声明后，**每一条**返回路径（包括错误）都必须带
+  `output`，否则整次调用变成宿主错误而不是工具结果 —— 这正是 1.1.0 把错误也改成
+  `{ ok:false, error:{code,message} }` 的原因。
+- 不返回 `content` 时宿主会把 `content` 设为 `JSON.stringify(output)`（单行）。插件显式返回缩进
+  2 空格的 JSON 作为 `content`，与 `output` 是同一份数据（E 段有断言）。
+- schema 只声明跨动作的契约（`schemaVersion` / `action` / `ok` / `warnings` / `error.code`），
+  不用 `oneOf` / `$ref` / `nullable`：宿主的 JSON Schema 转换对深嵌套形态没有实测过，而校验
+  失败会让调用直接失败。动作字段在文档站与 README 里定义。
+
+真实宿主复验（本机 2.0.32，`--standalone` 新进程，读真实注册表，零写入）：
+
+```pwsh
+opencode run --standalone --auto --format json '调用原生工具 skill_management，参数 action 为 list。不要使用 execute / Code Mode 工具，直接按名字调用。'
+# tool_use status=completed
+# output/content 均以 {"schemaVersion":1,"action":"list","ok":true,... 开头，可 JSON.parse
+# 本机 33 个 skill，警告行：另有 33 个 skill 在其它 agent 下状态不同
+
+opencode run --standalone --auto --format json '调用原生工具 skill_management，参数 action 为 inspect、id 为 definitely-not-a-skill。…'
+# tool_use status=completed
+# {"schemaVersion":1,"action":"inspect","ok":false,"error":{"code":"skill_not_found",…}}
+```
+
+第二条尤其关键：**错误分支也通过了 output 校验**，没有被宿主的 schema 校验拦下。

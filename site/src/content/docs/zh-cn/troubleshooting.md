@@ -60,7 +60,7 @@ skill_management({ action: "inspect", id: "<id>" })
    其它 agent 可能已经看到新规则。
 3. **校验失败。** 原文件已恢复，输出会说明回滚。
 
-第 2 种不是写入 bug，而是规则顺序的事实。`inspect` 有逐 agent 表。覆盖规则需要你自己删除或
+第 2 种不是写入 bug，而是规则顺序的事实。`inspect.agents[]` 有逐 agent 结果。覆盖规则需要你自己删除或
 修改 —— 插件不编辑 agent 级权限。
 
 ## `disable` 什么都没改，说已经是停用状态

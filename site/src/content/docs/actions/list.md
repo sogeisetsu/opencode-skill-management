@@ -1,6 +1,6 @@
 ---
 title: list
-description: Every registered skill, its effective state for the calling agent, and config consistency notes. Read-only.
+description: Every registered skill, its effective state for the calling agent, and config consistency notes. Read-only, JSON output.
 ---
 
 `list` answers "what is installed right now, and which of it is actually available to me?"
@@ -20,35 +20,51 @@ skill_management({ action: "list" })
 
 ## What it returns
 
-A Markdown table with one row per registered skill, sorted by id:
+One JSON object. Every action starts with the same envelope:
 
-| Column | Values |
-|---|---|
-| `id` | Skill id from the host registry, or derived from the path when the registry entry has none. |
-| `name` | Registry name (`frontmatter.name` when it differs). |
-| `autoinvoke` | `off` when the registry says `autoinvoke: false`, otherwise empty. |
-| `source` | `embedded`, `config`, `claude`, `agents`, `catalog`, `project`, `plugin` or `unknown`. |
-| `scope` | `user` or `project`, relative to the home directory. |
-| `state` | `available`, `disabled` or `ask`. Evaluated for the **calling agent only**. |
-| `path` | Absolute path as reported by the registry. |
-| `description` | First line of the description, truncated to 60 characters. |
+| Field | Type | Meaning |
+|---|---|---|
+| `schemaVersion` | number | `1` in 1.1.0. |
+| `action` | string | `"list"`. |
+| `ok` | boolean | `true` when the registry and config were read. |
+| `warnings` | string[] | Human-readable notes (Chinese in 1.1.0); empty when there is nothing to report. |
 
-Below the table:
+`list` adds:
 
-- `发现 N 个、已禁用 M 个、ask K 个。` — totals for the caller.
-- `调用者 agent：\`<id>\`` — the agent whose rule set was used. If the caller cannot be resolved,
-  the line is followed by a warning and the fallback agent is named.
-- An `ℹ️` line when some skills differ under other agents (the per-agent breakdown is in
-  `inspect`).
-- A note when some ids were derived from paths rather than supplied by the registry.
-- Sidecar checks: a recorded rule that is no longer in the config, a config rule the sidecar
-  does not know about, or a recorded id that is no longer registered.
-- The resolved target config file and why that file was chosen.
+| Field | Type | Meaning |
+|---|---|---|
+| `callerAgent.id` | string \| null | Agent whose rule set was evaluated. |
+| `callerAgent.verified` | boolean | `false` when `context.agent` was missing or not in the registry; the result falls back to a visible agent and `warnings` says so. |
+| `summary.total` | number | Registered skills. |
+| `summary.disabled` | number | Skills whose caller effect is `deny`. |
+| `summary.ask` | number | Skills whose caller effect is `ask` (explicit or host fallback). |
+| `summary.diverged` | number | Skills whose effect differs under at least one other agent. |
+| `summary.derivedIds` | number | Ids derived from paths because the registry supplied none. |
+| `skills[]` | object[] | One entry per skill, sorted by id. |
+| `skills[].id` | string \| null | Registry id, or derived from the path. `null` when neither exists. |
+| `skills[].name` | string \| null | Registry name (`frontmatter.name` when it differs). |
+| `skills[].autoinvoke` | boolean \| null | `false` means the registry turned auto-invocation off; `null` when the registry did not provide it. |
+| `skills[].source` | string | `embedded`, `config`, `claude`, `agents`, `catalog`, `project`, `plugin` or `unknown`. |
+| `skills[].scope` | string | `user` or `project`, relative to the home directory. |
+| `skills[].state` | string | `available`, `disabled`, `ask` or `unknown`. Evaluated for the **calling agent only**. |
+| `skills[].path` | string \| null | Absolute path as reported by the registry. |
+| `skills[].description` | string \| null | First line of the description; not truncated further. |
+| `config.file` | string | Global config file that writes would target. |
+| `config.configDir` | string | Resolved `<config>` directory. |
+| `config.configDirs` | string[] | Candidate directories considered. |
+| `config.hadPermissions` | boolean | Whether the target document already had a `permissions` array. |
+| `config.notes` | string[] | Why that file was chosen. |
+| `sidecar.file` | string | `<config>/skill_management.state.json`. |
+| `sidecar.ok` | boolean | Whether the sidecar could be read. |
+| `sidecar.error` | string \| null | Read error, without guessing at its meaning. |
+| `consistency.staleSidecarIds` | string[] | Sidecar records with no matching rule in the config. |
+| `consistency.unrecordedRules` | object[] | Config `skill` rules the sidecar does not know: `resource`, `effect`. |
+| `consistency.missingFromRegistry` | string[] | Recorded ids that are no longer registered. |
 
-The tool's messages are Chinese in 1.0.0; the table structure and values above are the stable
-part.
+Skill bodies are never included. Messages inside `warnings` are Chinese in 1.1.0; field names and
+values above are the stable part.
 
-## Reading the state column
+## Reading `state`
 
 - `available` — the caller's last matching rule is `allow`, or an earlier rule allows it and
   nothing overrides it.
@@ -60,35 +76,49 @@ part.
 State is computed per agent on purpose. Merging all agents' rules would leak a sub-agent's
 `deny` into the caller's view, which is a bug this project has already had to fix.
 
-## Abridged output
+## Example output
 
-The tool returns Markdown; this is the rendered form, with columns abridged.
-
-:::note[Rendered output]
-
-**skills (N)**
-
-| id | source | state | path |
-|---|---|---|---|
-| windows-shell | config | available | `<config>\skills\windows-shell\SKILL.md` |
-| pdf-tools | catalog | disabled | `<cache>\skills\pdf-tools\SKILL.md` |
-
-The full table also has `name`, `autoinvoke`, `scope` and `description` columns.
-
-发现 N 个、已禁用 1 个、ask 0 个。
-
-调用者 agent：`build`（state 列按该 agent 的有效规则集求值，见规范 §3.6）
-
-ℹ️ 另有 2 个 skill 在其它 agent 下状态不同（详见 `inspect` 的逐 agent 表）。
-
-目标配置文件：`<config>\opencode.jsonc`
-
-- 目标文件含现有 permissions，直接在其数组中追加/删除
-
-:::
-
-`§3.6` is a section of the project's internal design spec; the behavior it refers to is
-documented in [Permissions & evaluation](../../permissions/).
+```json
+{
+  "schemaVersion": 1,
+  "action": "list",
+  "ok": true,
+  "warnings": ["另有 2 个 skill 在其它 agent 下状态不同（逐 agent 明细见 inspect）。"],
+  "callerAgent": { "id": "build", "verified": true },
+  "summary": { "total": 29, "disabled": 1, "ask": 0, "diverged": 2, "derivedIds": 0 },
+  "skills": [
+    {
+      "id": "windows-shell",
+      "name": "windows-shell",
+      "autoinvoke": null,
+      "source": "config",
+      "scope": "user",
+      "state": "available",
+      "path": "<config>\\skills\\windows-shell\\SKILL.md",
+      "description": "Windows shell conventions…"
+    },
+    {
+      "id": "pdf-tools",
+      "name": "pdf-tools",
+      "autoinvoke": null,
+      "source": "catalog",
+      "scope": "user",
+      "state": "disabled",
+      "path": "<cache>\\skills\\pdf-tools\\SKILL.md",
+      "description": "Read and extract from PDF files."
+    }
+  ],
+  "config": {
+    "file": "<config>\\opencode.jsonc",
+    "configDir": "<config>",
+    "configDirs": ["<config>"],
+    "hadPermissions": true,
+    "notes": ["目标文件含现有 permissions，直接在其数组中追加/删除"]
+  },
+  "sidecar": { "file": "<config>\\skill_management.state.json", "ok": true, "error": null },
+  "consistency": { "staleSidecarIds": [], "unrecordedRules": [], "missingFromRegistry": [] }
+}
+```
 
 Use it before a bulk cleanup, and again after `disable` to confirm the state actually changed.
 

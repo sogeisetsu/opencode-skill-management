@@ -86,7 +86,7 @@ rules[1] { action: "skill", resource: "windows-shell", effect: "deny"  }
 典型分歧：全局配置 deny 了某个 skill，但某个 agent 自己有更靠后的 `allow`，或反过来。此时：
 
 - `list` 显示调用者的状态，并提示其它 agent 不同。
-- `inspect` 打印逐 agent 表。
+- `inspect` 在 `agents[]` 里返回逐 agent 结果。
 - `disable` 会说明规则确实写入、但调用者实际效果仍不同，而不是谎称成功。
 
 写在 `agents.<id>.permissions` 里的规则，本工具不编辑，只报告。

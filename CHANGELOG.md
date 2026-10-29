@@ -2,6 +2,38 @@
 
 本文件记录对外可见的变化。版本遵循语义化版本；1.x 内的兼容承诺见 README「兼容性与边界」。
 
+## 1.1.0 — 2026-10-30
+
+**破坏性变更**：四个动作的输出从 Markdown 改为单个 JSON 对象。动作、入参、写入的规则形状、
+行尾标记与单文件结构都没变；这是 1.1.0 唯一的破坏性变更。
+
+### 变更
+
+- 工具现在声明 `output` JSON Schema，并同时返回 `output` 与缩进后的 JSON `content`。宿主
+  2.0.32 实测：声明 `output` 后不返回它会被判 `Tool did not return its declared output`；
+  没声明却返回会被判 `Tool result declared output without an output schema`；声明后不返回
+  `content` 时宿主把 `content` 设为 `JSON.stringify(output)`。
+- 所有结果共用信封 `{ schemaVersion: 1, action, ok, warnings }`；失败另带
+  `error: { code, message }`，不再靠正文里的 ❌/✅ 判断成败。
+- `list` 返回 `callerAgent` / `summary` / `skills[]` / `config` / `sidecar` / `consistency`。
+  `description` 仍只取首行，但不再截断到 60 字符。
+- `inspect` 返回 `skill` / `idDerivation` / `agents[]` / `caller` / `conclusion`；找不到与
+  重名分别用 `skill_not_found` / `name_ambiguous` 表示，近似 id 在 `near`，候选在 `candidates`。
+- `disable` / `enable` 返回 `changed` / `reason` / `before` / `diff` / `verification` /
+  `backup` / `sidecar`。`enable` 另有 `location`（`marker` / `sidecar`）、`rule`、
+  `candidates`、`relatedRules`；拒绝原因改用错误码（`unverifiable_origin` /
+  `ambiguous_rule` / `no_matching_rule` / `config_unparsable`）。
+- `enable` 在目标配置无法解析、又没有候选规则时，改为 `ok:false` + `config_unparsable`，
+  不再把「读不到」说成「无需修改」。
+- `disable` 的 `already_disabled` / `covered_by_broader_rule` 从正文改为 `reason` 字段；
+  `dryRun` 用 `dryRun: true` / `planned: true` / `diff[]` 表达，`message` 保留一句说明。
+
+### 测试
+
+- 断言 248 → **260**。E 段改为解析 `content` 后按字段断言，并新增：`content` 是合法 JSON、
+  与 `output` 是同一份数据、信封字段齐全、没有 Markdown 表格分隔行、未知动作也返回 JSON。
+- 原「未声明 output 时结果不含 output」改为「声明 output 后结果必须带 output」。
+
 ## 1.0.0 — 2026-10-23
 
 首个正式版。四个动作的入参与输出语义自此冻结（见 README「1.0.0 兼容承诺」）。

@@ -1,6 +1,6 @@
 ---
 title: inspect
-description: One skill in detail — conclusion, matched rule, per-agent differences and where the id came from. Read-only.
+description: One skill in detail — conclusion, matched rule, per-agent differences and where the id came from. Read-only, JSON output.
 ---
 
 `inspect` is the diagnostic action. It answers three questions about one skill: is it usable
@@ -26,76 +26,125 @@ skill_management({ action: "inspect", name: "windows-shell" })
 
 ## What it returns
 
-**The metadata table.** `id`, `name`, whether `name` differs from `id`, whether matching was by
-id or alias, `path`, `source`, `scope`, a truncated `description`, the raw
-`frontmatter.name`, `frontmatter.disable-model-invocation`, and the registry's `autoinvoke`
-value. Missing values are shown as `(未读到)` / `(未提供)`, never invented.
+The same envelope as every action (`schemaVersion`, `action`, `ok`, `warnings`), plus:
 
-**`## id 推导` — where the id came from.** If the registry supplied an `id`, it says so and
-shows the path for cross-checking. If it did not, the id was derived from the path and the
-derivation is printed:
+| Field | Type | Meaning |
+|---|---|---|
+| `matchedBy` | string | `id` or `name`. |
+| `skill.id` | string \| null | Resolved skill id. |
+| `skill.name` | string \| null | Registry name. |
+| `skill.nameDiffersFromId` | boolean | Whether `frontmatter.name` overrides the id. |
+| `skill.path` | string \| null | Path from the registry. |
+| `skill.source` / `skill.scope` | string | Same values as `list`. |
+| `skill.description` | string \| null | First line of the registry description. |
+| `skill.autoinvoke` | boolean \| null | Registry value, or `null` when not provided. |
+| `skill.frontmatter` | object | `name` and `disableModelInvocation`, each string/boolean or `null` when unreadable. |
+| `idDerivation.idSource` | string | `registry`, `derived` or `none`. |
+| `idDerivation.explained` | string | Which rule produced the id, in prose. |
+| `idDerivation.rule` | string \| null | The derivation rule text. |
+| `idDerivation.pathField` | string \| null | Which registry field was used as the path (`path` or `location`). |
+| `idDerivation.dir` / `idDerivation.base` | string \| null | Inputs to the derivation. |
+| `agents[]` | object[] | Per-agent evaluation: `id`, `effect`, `index`, `rule` (`null` when no rule matched). |
+| `divergentAgents[]` | object[] | Agents whose effect differs from the caller's: `id`, `effect`. |
+| `caller` | object | `id`, `effect`, `index`, `rule`, `coveredByBroaderRule`, `broaderRule`. |
+| `conclusion.state` | string | `available`, `disabled` or `ask`. |
+| `conclusion.message` | string | The same conclusion as one human-readable sentence. |
+
+`index` is the position of the last matching rule in that agent's rule set; `-1` means no rule
+matched and the host fell back to `ask`. Missing values are `null`, never invented.
+
+### id derivation
+
+If the registry supplied an `id`, `idSource` is `registry` and the path is included for
+cross-checking. If it did not, the id was derived from the path:
 
 - `<dir>/SKILL.md` → the directory name.
 - `<dir>/<name>.md` → the file name without `.md`.
 
-If neither an id nor a usable path exists, it says the id cannot be determined and treats the
-id as empty.
+If neither an id nor a usable path exists, `idSource` is `none`, `rule` is `null`, and the id is
+treated as empty.
 
-**`## 有效判定` — per-agent evaluation.** A table of `agent`, `effect`, `命中规则` (up to 30
-agents), followed by either "all agents agree" or a list of the agents whose effect differs.
-This is the table `list` points to when it says other agents disagree.
+### Per-agent evaluation
 
-**The conclusion for the caller.** One of:
+`agents` is the per-agent answer that `list` points to when it says other agents disagree. It is
+not merged: each entry is evaluated against that agent's own final rule set.
 
-- `不可用` — effect `deny`; the skill is hidden from the model-visible list and loading is
+### The conclusion
+
+- `disabled` — effect `deny`; the skill is hidden from the model-visible list and loading is
   rejected.
-- `可用但需确认` — effect `ask`; still listed, confirmation on load.
-- `可用` — effect `allow` (or another non-blocking effect).
+- `ask` — effect `ask`; still listed, confirmation on load.
+- `available` — any non-blocking effect.
 
-The matched rule is quoted as `rules[<index>] = {...}`. When no rule matched, it says
-`无规则命中 → 回退 ask` — the host's fallback, not an explicit rule.
+When the caller is denied by a wildcard or other broader rule (the matched `resource` is not this
+skill's id), `caller.coveredByBroaderRule` is `true` and `caller.broaderRule` holds that rule:
+the skill is blocked, but adding a rule for this id would not be the fix.
 
-If the caller is denied by a wildcard or other broader rule (the matched `resource` is not this
-skill's id), `inspect` says so explicitly: the skill is blocked, but adding a rule for this id
-would not be the fix.
+## Errors
 
-## Abridged output
-
-The tool returns Markdown. This is the rendered form of an `inspect` result; the table headers
-are Chinese, as the tool emits them.
-
-:::note[Rendered output]
-
-**Metadata**
-
-| 字段 | 值 |
+| `error.code` | When |
 |---|---|
-| id | windows-shell |
-| name | windows-shell |
-| name ≠ id | 否 |
-| 匹配方式 | 按 id 精确匹配 |
-| source | config |
-| scope | user |
-| description | Windows shell conventions… |
-| frontmatter.disable-model-invocation | (未读到) |
+| `skill_not_found` | No id matched. `near` lists similar ids from the registry. |
+| `name_ambiguous` | The name matched several skills. `candidates` lists their ids. |
 
-**id 推导**
+```json
+{
+  "schemaVersion": 1,
+  "action": "inspect",
+  "ok": false,
+  "warnings": [],
+  "error": { "code": "skill_not_found", "message": "未找到 skill `no-such-skill`。（结论来自实际读到的注册表，未做猜测）" },
+  "near": ["windows-shell"]
+}
+```
 
-- `id`：`windows-shell`
-- 来源：**注册表直接给出**（本工具不反推，仅列出对应规则供核对）
-- 路径：`<config>\skills\windows-shell\SKILL.md`
+## Example output
 
-**有效判定**
-
-| agent | effect | 命中规则 |
-|---|---|---|
-| build | deny | `rules[3] = {"action":"skill","resource":"windows-shell","effect":"deny"}` |
-| explorer | allow | `rules[0] = {"action":"skill","resource":"*","effect":"allow"}` |
-
-> **结论**：`windows-shell` 对调用者 agent `build` 当前**不可用** —— 权限效果为 deny（命中
-> `rules[3] = {...}`），模型可见列表会隐藏它、且 `skill` 工具加载会被拒。
-
-:::
+```json
+{
+  "schemaVersion": 1,
+  "action": "inspect",
+  "ok": true,
+  "warnings": [],
+  "matchedBy": "id",
+  "skill": {
+    "id": "windows-shell",
+    "name": "windows-shell",
+    "nameDiffersFromId": false,
+    "path": "<config>\\skills\\windows-shell\\SKILL.md",
+    "source": "config",
+    "scope": "user",
+    "description": "Windows shell conventions…",
+    "autoinvoke": null,
+    "frontmatter": { "name": "windows-shell", "disableModelInvocation": null }
+  },
+  "idDerivation": {
+    "idSource": "registry",
+    "pathField": "path",
+    "dir": "<config>\\skills\\windows-shell",
+    "base": "SKILL.md",
+    "rule": "<dir>/SKILL.md → 取 SKILL.md 所在目录名",
+    "explained": "注册表直接给出（本工具不反推，仅列出对应规则供核对）"
+  },
+  "agents": [
+    { "id": "build", "effect": "deny", "index": 3, "rule": { "action": "skill", "resource": "windows-shell", "effect": "deny" } },
+    { "id": "explorer", "effect": "allow", "index": 0, "rule": { "action": "skill", "resource": "*", "effect": "allow" } }
+  ],
+  "divergentAgents": [{ "id": "explorer", "effect": "allow" }],
+  "caller": {
+    "id": "build",
+    "effect": "deny",
+    "index": 3,
+    "rule": { "action": "skill", "resource": "windows-shell", "effect": "deny" },
+    "coveredByBroaderRule": false,
+    "broaderRule": null
+  },
+  "conclusion": {
+    "state": "disabled",
+    "message": "`windows-shell` 对调用者 agent `build` 当前不可用：权限效果为 deny（命中 rules[3] = {\"action\":\"skill\",\"resource\":\"windows-shell\",\"effect\":\"deny\"}），模型可见列表会隐藏它、且 skill 工具加载会被拒。"
+  }
+}
+```
 
 ## When to use it
 
@@ -103,8 +152,5 @@ are Chinese, as the tool emits them.
 - A skill is installed but the model cannot load it.
 - `disable` reported that the rule was written but the caller still sees a different effect.
 - Before `enable`, to confirm which rule is actually blocking.
-
-If the id itself is unknown, `inspect` returns near matches from the registry rather than a
-guess.
 
 Next: [`disable`](../disable/) to act on what you found.

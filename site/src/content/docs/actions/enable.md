@@ -1,6 +1,6 @@
 ---
 title: enable
-description: Delete the one exact global rule that blocks a skill — or refuse and show why it cannot be uniquely identified.
+description: Delete the one exact global rule that blocks a skill — or refuse with a JSON error code and show why it cannot be uniquely identified.
 ---
 
 `enable` removes the blocking rule from the global config. It does not add an `allow` rule: once
@@ -42,7 +42,7 @@ Only rules that:
 2. **Sidecar record, no marker.** If `<config>/skill_management.state.json` records the id and
    the config contains exactly one identical rule, that rule is deleted with a warning that the
    marker was stripped.
-3. **Neither.** It refuses, prints the exact rule text from the config, and leaves the file
+3. **Neither.** It refuses, returns the exact rule text from the config, and leaves the file
    alone. It does not guess which of several similar rules you meant.
 
 It also refuses when the config cannot be parsed, because locating and safely deleting a rule
@@ -70,24 +70,71 @@ Those cases are reported with the matched rule, never edited. Fix them by hand.
 6. Reload and poll until the caller's exact-rule count decreases, or time out
    (`SKILL_MGMT_VERIFY_TIMEOUT_MS`, default 6 s). On timeout, restore the original bytes.
 7. Report the rule's origin and the caller's **post-deletion** effective effect. If a broader
-   rule still denies it, the output says so instead of implying success.
+   rule still denies it, the result says so instead of implying success.
 
-## Reading the result
+## What it returns
 
-A successful run names the file, whether a `permissions` block was cleaned up, where the deleted
-rule came from (marker, sidecar), and the effect after deletion. `dryRun` ends with
-`dryRun：未写入任何文件。`
+The usual envelope (`schemaVersion`, `action`, `ok`, `warnings`) plus:
 
-Example outcomes:
+| Field | Type | Meaning |
+|---|---|---|
+| `id`, `dryRun` | string, boolean | Echo of the resolved request. |
+| `callerAgent` | string \| null | Agent whose rule set was used. |
+| `before` | object | `index` and `rule` before deletion; `rule` is `null` when nothing matched. |
+| `targetFiles` | string[] | Files considered (target config plus any sidecar-recorded file). |
+| `changed` | boolean | `true` only when a rule was actually deleted. |
+| `reason` | string | Present when `changed` is `false`: `nothing_to_enable`. |
+| `message` | string | The human-readable explanation for a no-op or a `dryRun`. |
+| `location` | object | `how` = `marker` or `sidecar`; `origin` is the prose explanation. |
+| `rule` | object | `file` and the exact `text` of the deleted (or deletable) rule. |
+| `diff` | string[] | The removed line, for `dryRun`. |
+| `backup` | string | Backup path for the file that was edited. |
+| `sidecar` | string | Sidecar path written after success. |
+| `verification` | object | `ok`, `via`, `caller`, and `effect` after deletion. |
+
+A successful run also reports whether a now-empty `permissions` block was cleaned up, and if the
+caller is still `deny` because of a broader rule, that rule is quoted in `warnings`.
+
+## Errors
+
+| `error.code` | When | Extra fields |
+|---|---|---|
+| `unverifiable_origin` | Neither marker nor sidecar confirms the rule. | `rule`: the exact line |
+| `ambiguous_rule` | Several exact rules for the same id. | `candidates[]`: `file`, `text` |
+| `no_matching_rule` | No exact rule; the blocker is broader. | `relatedRules[]`, `callerHit` |
+| `config_unparsable` | The target config has a JSONC syntax error. | `warnings` |
+| `verification_failed` | The host did not drop the rule in time. | `rolledBack: true` |
+| `skill_not_found` / `name_ambiguous` / `missing_param` | Target resolution failed. | `near` / `candidates` |
+
+```json
+{
+  "schemaVersion": 1,
+  "action": "enable",
+  "ok": false,
+  "warnings": [],
+  "error": {
+    "code": "ambiguous_rule",
+    "message": "拒绝执行：配置里有 2 条精确命中 `windows-shell` 的规则，无法唯一定位（宿主求值是最后一条命中算数）。"
+  },
+  "id": "windows-shell",
+  "changed": false,
+  "candidates": [
+    { "file": "<config>\\opencode.jsonc", "text": "{ \"action\": \"skill\", \"resource\": \"windows-shell\", \"effect\": \"deny\" } // skill_management" },
+    { "file": "<config>\\opencode.jsonc", "text": "{ \"action\": \"skill\", \"resource\": \"windows-shell\", \"effect\": \"deny\" }" }
+  ]
+}
+```
+
+## Outcome at a glance
 
 | Situation | Result |
 |---|---|
-| Rule written by this tool, marker intact | Deleted; origin = marker comment. |
-| Marker stripped, sidecar matches one rule | Deleted with a warning to check the config. |
-| Two identical rules for the same id | Refused; candidates printed. |
-| Blocked by `resource: "*"` | Refused; broad rule printed. |
-| Blocked only in one agent's own rules | Refused; agent-level rule printed. |
-| No rule and not blocked | Reports that nothing needed changing. |
+| Rule written by this tool, marker intact | `ok: true`, `location.how = "marker"`. |
+| Marker stripped, sidecar matches one rule | `ok: true`, `location.how = "sidecar"`, warning to check the config. |
+| Two identical rules for the same id | `ok: false`, `ambiguous_rule`, candidates printed. |
+| Blocked by `resource: "*"` | `ok: false`, `no_matching_rule`, broad rule in `relatedRules`. |
+| Blocked only in one agent's own rules | `ok: false`, `no_matching_rule`, `callerHit` names the agent. |
+| No rule and not blocked | `ok: true`, `changed: false`, `reason: "nothing_to_enable"`. |
 
 ## Writes configuration?
 

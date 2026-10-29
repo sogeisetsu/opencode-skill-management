@@ -92,7 +92,7 @@ A typical divergence: the global config denies a skill, but one agent has its ow
 or vice versa. In that case:
 
 - `list` shows the caller's state and says other agents differ.
-- `inspect` prints the per-agent table.
+- `inspect` returns the per-agent results in `agents[]`.
 - `disable` reports that the rule was written but the caller's actual effect is still different,
   instead of claiming success.
 

@@ -1,6 +1,6 @@
 ---
 title: enable
-description: 删除挡路的那一条精确全局规则 —— 无法唯一定位时拒绝，并说明原因。
+description: 删除挡路的那一条精确全局规则 —— 无法唯一定位时返回 JSON 错误码并说明原因。
 ---
 
 `enable` 从全局配置里删除挡路的规则。它**不**新增 `allow`：精确的 `deny`/`ask` 条目消失后，
@@ -39,7 +39,7 @@ skill_management({ action: "enable", id: "windows-shell", dryRun: true })
    这是正常路径。
 2. **sidecar 记录，没有标记。** `<config>/skill_management.state.json` 里有该 id 的记录，且配置里
    恰好一条完全相同的规则时，删除并警告标记已被剥离。
-3. **两者都没有。** 拒绝执行，贴出配置里该规则的原文，文件保持原样。不会在多条相似规则里猜。
+3. **两者都没有。** 拒绝执行，返回配置里该规则的原文，文件保持原样。不会在多条相似规则里猜。
 
 配置无法解析时同样拒绝：在语法错误的 JSONC 里定位并安全删除规则是不可能的。
 
@@ -63,23 +63,71 @@ skill_management({ action: "enable", id: "windows-shell", dryRun: true })
 6. 重载并轮询，直到调用者的精确规则条数减少，或超时
    （`SKILL_MGMT_VERIFY_TIMEOUT_MS`，默认 6 秒）。超时则恢复原字节。
 7. 报告规则来源，以及**删除后**调用者的实际生效效果。如果仍被更宽的规则压成 deny，
-   输出会明说，而不是暗示成功。
+   结果会明说，而不是暗示成功。
 
-## 怎么读结果
+## 返回什么
 
-成功时会写明文件、是否清理了空的 `permissions` 块、被删规则的来源（标记 / sidecar），
-以及删除后的效果。`dryRun` 以 `dryRun：未写入任何文件。` 结尾。
+通用信封（`schemaVersion`、`action`、`ok`、`warnings`）之外：
 
-常见结果：
+| 字段 | 类型 | 含义 |
+|---|---|---|
+| `id`、`dryRun` | string、boolean | 解析后的请求回显。 |
+| `callerAgent` | string \| null | 用的是哪个 agent 的规则集。 |
+| `before` | object | 删除前的 `index` 与 `rule`；无命中时 `rule` 为 `null`。 |
+| `targetFiles` | string[] | 参与判断的文件（目标配置 + sidecar 记录过的文件）。 |
+| `changed` | boolean | 只有真的删掉规则才是 `true`。 |
+| `reason` | string | `changed` 为 `false` 时出现：`nothing_to_enable`。 |
+| `message` | string | 空操作或 `dryRun` 的人类可读说明。 |
+| `location` | object | `how` 为 `marker` 或 `sidecar`；`origin` 是文字说明。 |
+| `rule` | object | `file` 与被删（或可删）规则的原文 `text`。 |
+| `diff` | string[] | `dryRun` 时将被删除的那一行。 |
+| `backup` | string | 被编辑文件的备份路径。 |
+| `sidecar` | string | 成功后写入的 sidecar 路径。 |
+| `verification` | object | `ok`、`via`、`caller`，以及删除后的 `effect`。 |
+
+成功时还会说明是否顺手清理了变空的 `permissions` 块；如果调用者仍因更宽的规则而为 `deny`，
+`warnings` 里会给出那条规则。
+
+## 错误
+
+| `error.code` | 何时 | 附带字段 |
+|---|---|---|
+| `unverifiable_origin` | 既无标记也无 sidecar 记录能确认该规则。 | `rule`：规则原文 |
+| `ambiguous_rule` | 同一 id 有多条精确规则。 | `candidates[]`：`file`、`text` |
+| `no_matching_rule` | 没有精确规则；挡路的是更宽的规则。 | `relatedRules[]`、`callerHit` |
+| `config_unparsable` | 目标配置有 JSONC 语法错误。 | `warnings` |
+| `verification_failed` | 宿主没有及时丢掉该规则。 | `rolledBack: true` |
+| `skill_not_found` / `name_ambiguous` / `missing_param` | 目标解析失败。 | `near` / `candidates` |
+
+```json
+{
+  "schemaVersion": 1,
+  "action": "enable",
+  "ok": false,
+  "warnings": [],
+  "error": {
+    "code": "ambiguous_rule",
+    "message": "拒绝执行：配置里有 2 条精确命中 `windows-shell` 的规则，无法唯一定位（宿主求值是最后一条命中算数）。"
+  },
+  "id": "windows-shell",
+  "changed": false,
+  "candidates": [
+    { "file": "<config>\\opencode.jsonc", "text": "{ \"action\": \"skill\", \"resource\": \"windows-shell\", \"effect\": \"deny\" } // skill_management" },
+    { "file": "<config>\\opencode.jsonc", "text": "{ \"action\": \"skill\", \"resource\": \"windows-shell\", \"effect\": \"deny\" }" }
+  ]
+}
+```
+
+## 常见结果
 
 | 情况 | 结果 |
 |---|---|
-| 本工具写入、标记完整 | 删除；来源 = 行尾标记。 |
-| 标记被剥离，sidecar 恰好一条 | 删除并警告核对配置。 |
-| 同一 id 有两条相同规则 | 拒绝；打印候选。 |
-| 被 `resource: "*"` 挡住 | 拒绝；打印宽规则。 |
-| 只在某个 agent 自己的规则里被挡 | 拒绝；打印 agent 级规则。 |
-| 没有规则，也没被挡 | 报告无需修改。 |
+| 本工具写入、标记完整 | `ok: true`，`location.how = "marker"`。 |
+| 标记被剥离，sidecar 恰好一条 | `ok: true`，`location.how = "sidecar"`，并警告核对配置。 |
+| 同一 id 有两条相同规则 | `ok: false`，`ambiguous_rule`，打印候选。 |
+| 被 `resource: "*"` 挡住 | `ok: false`，`no_matching_rule`，`relatedRules` 给出宽规则。 |
+| 只在某个 agent 自己的规则里被挡 | `ok: false`，`no_matching_rule`，`callerHit` 点名该 agent。 |
+| 没有规则，也没被挡 | `ok: true`，`changed: false`，`reason: "nothing_to_enable"`。 |
 
 ## 写不写配置？
 

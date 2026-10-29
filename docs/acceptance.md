@@ -261,10 +261,38 @@ CI（`ubuntu-latest` + `windows-latest`）跑同一套 248 项断言。
 
 > 注：`npm view` 首次查询会被本地 npm 缓存回成 `0.2.0`，加 `--prefer-online` 或直接查 `registry.npmjs.org` 才是最新值（已用两种方式交叉核对）。
 
+## 1.1.0 验收（2026-10-30 · JSON 输出 + output schema）
+
+目标：四个动作从 Markdown 改为结构化 JSON，并且是宿主能校验的真正 `output`，不是把 Markdown 包进一段 JSON 字符串。
+
+| 检查 | 结果 |
+|---|---|
+| 工具声明 `output` JSON Schema | ✅ 宿主接受（没有 schema 转换错误） |
+| 新进程 `list`（真实注册表，零写入） | ✅ `status=completed`；content 可 `JSON.parse`，`"schemaVersion":1`、`"action":"list"`、`"ok":true`；本机 33 个 skill |
+| 新进程 `inspect` 不存在的 id | ✅ `status=completed`；`ok:false`、`error.code="skill_not_found"` —— **错误分支同样通过 output 校验** |
+| `node tools/verify.mjs` | ✅ 260 项全过（248 → 260；E 段改为解析 JSON 断言） |
+| `npm run docs:build` / `npm run docs:check` | ✅ 20 路由（10 en + 10 zh 镜像）、内部链接与语言切换全过 |
+| `node tools/install.mjs` | ✅ 安装副本与 `src` 同哈希 `42443121FC5234C5…`（75756 bytes） |
+
+实测命令（新进程；提示词明确要求不要走 Code Mode）：
+
+```pwsh
+opencode run --standalone --auto --format json '调用原生工具 skill_management，参数 action 为 list。不要使用 execute / Code Mode 工具，直接按名字调用。'
+# tool_use status=completed
+# content/output 以 {"schemaVersion":1,"action":"list","ok":true,... 开头
+# warnings: 另有 33 个 skill 在其它 agent 下状态不同（逐 agent 明细见 inspect）
+
+opencode run --standalone --auto --format json '调用原生工具 skill_management，参数 action 为 inspect、id 为 definitely-not-a-skill。不要使用 execute / Code Mode 工具。'
+# tool_use status=completed
+# {"schemaVersion":1,"action":"inspect","ok":false,"warnings":[],"near":[],"error":{"code":"skill_not_found",...}}
+```
+
+宿主为什么能接受这些形态、以及 `output` / `content` 的运行时规则，见 `docs/preflight.md` §7。
+
 ## 复跑方式
 
 ```pwsh
-node tools/verify.mjs        # 248 项断言，跑在临时配置目录，不触碰真实配置
+node tools/verify.mjs        # 260 项断言，跑在临时配置目录，不触碰真实配置
 node tools/install.mjs       # 幂等安装到 <config>/plugins/
 ```
 

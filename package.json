@@ -1,7 +1,7 @@
 {
   "name": "opencode-skill-management",
-  "version": "1.0.0",
-  "description": "OpenCode V2 plugin: list / inspect / disable / enable installed skills by writing one global permission rule",
+  "version": "1.1.0",
+  "description": "OpenCode V2 plugin: list / inspect / disable / enable installed skills by writing one global permission rule, with JSON results",
   "type": "module",
   "exports": {
     ".": "./src/skill_management.js"
