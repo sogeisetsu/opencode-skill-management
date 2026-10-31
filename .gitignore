@@ -18,3 +18,5 @@ site/.astro/
 
 # in-app browser captures
 .openchamber/screenshots/
+# 忽略项目级别命令
+.opencode
