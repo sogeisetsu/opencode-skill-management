@@ -72,6 +72,69 @@ function parseStrict(text) {
   return JSON.parse(chars.join(""))
 }
 
+/**
+ * 按插件声明的 OUTPUT_SCHEMA 校验一份 output。
+ * 只断言信封四字段是不够的：schema 声明了 id/effect/reason/message 为 string、
+ * changed/dryRun 为 boolean，塞 null 也曾经全绿，而真机宿主会直接报
+ * `Tool did not return its declared output`。这里覆盖 required、properties 的 JSON 类型、
+ * 数组 items 与 error.{code,message}。
+ */
+function jsonTypeOf(v) {
+  if (v === null) return "null"
+  if (Array.isArray(v)) return "array"
+  if (typeof v === "number") return Number.isInteger(v) ? "integer" : "number"
+  return typeof v
+}
+
+function schemaProblems(schema, value, at = "output") {
+  const problems = []
+  if (!schema || typeof schema !== "object") return problems
+  if (schema.type) {
+    const actual = jsonTypeOf(value)
+    const want = Array.isArray(schema.type) ? schema.type : [schema.type]
+    // JSON Schema 的 number 接受整数；integer 不接受小数
+    const okType = want.some((t) => t === actual || (t === "number" && actual === "integer"))
+    if (!okType) {
+      problems.push(`${at}：期望 ${want.join("|")}，实际 ${actual}（${JSON.stringify(value)}）`)
+      return problems
+    }
+  }
+  if (Array.isArray(schema.required) && value && typeof value === "object") {
+    for (const k of schema.required) if (!(k in value)) problems.push(`${at}.${k}：缺失必需字段`)
+  }
+  if (schema.properties && value && typeof value === "object" && !Array.isArray(value)) {
+    for (const [k, sub] of Object.entries(schema.properties)) {
+      if (!(k in value)) continue
+      problems.push(...schemaProblems(sub, value[k], `${at}.${k}`))
+    }
+  }
+  if (schema.items && Array.isArray(value)) {
+    value.forEach((v, i) => problems.push(...schemaProblems(schema.items, v, `${at}[${i}]`)))
+  }
+  return problems
+}
+
+/** 每个动作都要过：output 满足 schema，且 content 与 output 是同一份数据 */
+function checkOutput(label, r) {
+  // 兼容两种传法：call() 的包装对象，或工具原始返回 { output, content }
+  const res = r && r.res && typeof r.res === "object" && "output" in r.res ? r.res : r
+  const output = res && res.output
+  const content = res && res.content
+  const problems = schemaProblems(mod.OUTPUT_SCHEMA, output)
+  ok(`${label}：output 满足 OUTPUT_SCHEMA`, problems.length === 0, problems.join("; ") || JSON.stringify(output))
+  let parsed
+  try {
+    parsed = JSON.parse(content)
+  } catch {
+    parsed = undefined
+  }
+  ok(
+    `${label}：content 与 output 是同一份数据`,
+    parsed !== undefined && JSON.stringify(parsed) === JSON.stringify(output),
+    content && content.slice(0, 200),
+  )
+}
+
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sm-verify-"))
 const keep = process.argv.includes("--keep")
 
@@ -1118,6 +1181,56 @@ async function call(action, args = {}) {
     ok("声明了 output 时结果必须带 output（宿主规则）", "output" in res && res.output && typeof res.output === "object")
     ok("output 满足声明的必需字段", ["schemaVersion", "action", "ok", "warnings"].every((k) => k in res.output), JSON.stringify(Object.keys(res.output)))
     ok("content 是同一份 JSON", JSON.parse(res.content).schemaVersion === res.output.schemaVersion)
+  }
+
+  // 1.1.0 review #4：每个动作的 output 都按 OUTPUT_SCHEMA 逐字段校验（不只看信封）
+  {
+    cfgsWrite(ORIGINAL)
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    const runs = []
+    runs.push(["list", await call("list")])
+    runs.push(["inspect", await call("inspect", { id: "grill-me" })])
+    runs.push(["disable", await call("disable", { id: "windows-shell" })])
+    runs.push(["enable", await call("enable", { id: "windows-shell" })])
+    runs.push(["unknown_action", await call("nope")])
+    runs.push(["skill_not_found", await call("inspect", { id: "no-such-skill" })])
+    runs.push(["missing_param", await call("disable", {})])
+    cfgsWrite('{\n  "permissions": [\n    { "action": "skill", "resource": "windows-shell", "effect": "deny" }\n  ]\n}\n')
+    runs.push(["unverifiable_origin", await call("enable", { id: "windows-shell" })])
+    for (const [label, res] of runs) checkOutput(label, res)
+    ok(
+      "E/schema 补充：写动作的 changed/dryRun/diff 类型正确",
+      runs[2][1].json.changed === true && typeof runs[2][1].json.dryRun === "boolean" && Array.isArray(runs[2][1].json.diff),
+      JSON.stringify({ changed: runs[2][1].json.changed, dryRun: runs[2][1].json.dryRun }),
+    )
+    ok(
+      "E/schema 补充：失败动作的 error.code / error.message 都是非空字符串",
+      runs
+        .filter(([, r]) => r.json.ok === false)
+        .every(([, r]) => typeof r.json.error?.code === "string" && r.json.error.code.length > 0 && typeof r.json.error.message === "string" && r.json.error.message.length > 0),
+      JSON.stringify(runs.filter(([, r]) => r.json.ok === false).map(([l, r]) => `${l}=${JSON.stringify(r.json.error)}`)),
+    )
+
+    // 校验器自身的负向用例：证明它抓得住类型错误，而不是永远返回空
+    const polluted = { schemaVersion: 1, action: "list", ok: true, warnings: [], id: null, changed: "yes" }
+    const problems = schemaProblems(mod.OUTPUT_SCHEMA, polluted)
+    ok(
+      "schema 校验能抓到 null 冒充 string、字符串冒充 boolean",
+      problems.some((p) => p.startsWith("output.id：")) && problems.some((p) => p.startsWith("output.changed：")),
+      problems.join("; "),
+    )
+    ok(
+      "schema 校验能抓到缺必需字段与 error 缺字段",
+      schemaProblems(mod.OUTPUT_SCHEMA, { action: "list", ok: true, warnings: [] }).some((p) => p.startsWith("output.schemaVersion：")) &&
+        schemaProblems(mod.OUTPUT_SCHEMA, { schemaVersion: 1, action: "x", ok: false, warnings: [], error: {} }).some((p) => p.startsWith("output.error.code：")),
+    )
+    ok(
+      "schema 校验能抓到 warnings 里塞非字符串",
+      schemaProblems(mod.OUTPUT_SCHEMA, { schemaVersion: 1, action: "x", ok: true, warnings: [1] }).some((p) => p.startsWith("output.warnings[0]：期望 string，实际 integer")),
+    )
+
+    cfgsWrite(ORIGINAL)
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
   }
 }
 
