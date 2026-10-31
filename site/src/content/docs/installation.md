@@ -30,19 +30,35 @@ opencode plugin add opencode-skill-management
 The npm package exports exactly one entry point: `./src/skill_management.js`. Runtime
 dependencies: none.
 
-## Channel 3 — copy the single file
+## Channel 3 — copy the single file (no npm updates)
 
-If neither channel fits (offline machine, vendored setup), copy the file into the plugins
-directory yourself:
+Use this when neither network channel fits (offline machine, vendored setup):
 
 ```pwsh
 node tools/install.mjs          # copies to <config>/plugins/skill_management.js
-node tools/install.mjs --dry-run
+node tools/install.mjs --check  # report only: path, version, conflicts
 ```
 
-The installer is idempotent: if the destination already has identical bytes, it does nothing.
-`<config>` is `$XDG_CONFIG_HOME/opencode` when that variable is set, otherwise
-`~/.config/opencode` (on Windows, `C:\Users\<you>\.config\opencode`).
+This channel is **pinned**: the file you install stays until you run the installer again. It does
+not follow npm releases, and upgrading means re-running `node tools/install.mjs`. If you want
+updates to arrive on their own, use channel 1 or 2 — `opencode plugin check` and
+`opencode plugin update` handle those.
+
+`<config>` resolves the way the host resolves it: `$OPENCODE_CONFIG_DIR`, then
+`$XDG_CONFIG_HOME/opencode`, then `~/.config/opencode` (on Windows,
+`C:\Users\<you>\.config\opencode`).
+
+Before writing anything the installer looks for a second source. If `opencode.json(c)` already
+lists this package in `plugins`, or another copy sits in `plugins/`, it refuses to write and exits
+with code `2`, leaving every file untouched.
+
+| Flag | Effect |
+|---|---|
+| `--check` / `--dry-run` | Report only, never write |
+| `--uninstall` | Delete `<config>/plugins/skill_management.js` and nothing else (refuses if the file is not this plugin) |
+| `--npm` | Assert the npm channel is installed; never write; exits `1` when it is missing |
+| `--force` | Write anyway (creates two copies; the host reports `Duplicate plugin ID` for one of them) |
+| `--json` | Machine-readable output |
 
 OpenCode loads every `.js` and `.ts` file in `<config>/plugins/`, plus subdirectories. You do
 not register the file in `opencode.jsonc`.
@@ -51,6 +67,15 @@ not register the file in `opencode.jsonc`.
 Because every file in `plugins/` is loaded as a plugin, do not split `skill_management` into
 helper modules or drop a second copy beside it. The distributed plugin is intentionally one
 file for this reason.
+:::
+
+:::caution[One plugin, one channel]
+A plugin id can only be loaded once. With both the npm entry and
+`<config>/plugins/skill_management.js` present, the host reports
+`Duplicate plugin ID: skill_management` and one of them shows as failed — the two do not simply
+coexist. Moving to npm: run `node tools/install.mjs --uninstall` first. Moving back to the single
+file: run `opencode plugin remove opencode-skill-management` first. `node tools/install.mjs --check`
+lists both sources and the exact command to run.
 :::
 
 ## Verify that it loaded

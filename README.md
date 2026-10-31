@@ -113,12 +113,28 @@ opencode plugin list --builtin
 opencode plugin add github:sogeisetsu/opencode-skill-management
 ```
 
-**离线：单文件直接放进插件目录**
+**离线：单文件直接放进插件目录（不跟 npm 更新）**
 
 ```pwsh
 node tools/install.mjs          # 复制到 <config>/plugins/skill_management.js
-node tools/install.mjs --dry-run
+node tools/install.mjs --check  # 只报告：落点、版本、有没有冲突
 ```
+
+单文件通道是“装的时候是哪份，以后就一直用哪份”：它**不会**跟着 npm 更新，升级就是重新跑一次
+`node tools/install.mjs`。想要自动更新就别用这条通道，用上面 `opencode plugin add` 那条（升级走
+`opencode plugin check` / `opencode plugin update`，由宿主管）。
+`<config>` 的解析顺序与宿主一致：`$OPENCODE_CONFIG_DIR` → `$XDG_CONFIG_HOME/opencode` → `~/.config/opencode`。
+
+安装器会先看有没有别的来源：`opencode.json(c)` 的 `plugins` 数组里已经有本包、或者 `plugins/` 里
+还有第二份副本时，它**拒绝写入**并返回退出码 `2`，一个字节都不动。
+
+| 参数 | 作用 |
+|---|---|
+| `--check` / `--dry-run` | 只报告现状与冲突，不写任何文件 |
+| `--uninstall` | 只删 `<config>/plugins/skill_management.js` 这一个文件（内容不像本插件就拒绝） |
+| `--npm` | 断言走 npm 渠道，永不写文件；没找到渠道退出 `1` |
+| `--force` | 无视冲突照写（会制造两份，宿主会给其中一份报 `Duplicate plugin ID`） |
+| `--json` | 机器可读输出 |
 
 宿主会自动加载 `<config>/plugins/*.js`，不需要在配置里登记；列表里显示为 `local` 加文件路径：
 
@@ -131,7 +147,11 @@ opencode plugin list --builtin
 
 ### 不要装两份
 
-同一份插件只能有一种来源。npm 包和 `<config>/plugins/skill_management.js` 同时存在时，`plugin list` 会出现两行 `skill_management`，两者注册同名工具，后加载的覆盖前者——能用，但排查问题时很容易看错版本。切换方式时先删掉旧的那一份。
+同一个 plugin id 只能有一份。npm 包和 `<config>/plugins/skill_management.js` 同时存在时，宿主会
+给其中一份报 `Duplicate plugin ID: skill_management`，界面上就是“加载失败”——不是“两份都能用、
+只是看错版本”。切换渠道时：切到 npm 先 `node tools/install.mjs --uninstall`；切回单文件先
+`opencode plugin remove opencode-skill-management`。拿不准就先跑 `node tools/install.mjs --check`，
+它会把两处来源、各自版本和该跑哪条命令列出来。
 
 ## npm 包内容
 
@@ -150,7 +170,7 @@ opencode-skill-management-1.1.0.tgz
 仓库里有、但**不进包**的部分：
 
 ```text
-tools/            # verify.mjs（260 项断言）、install.mjs（离线安装）、linux-verify.sh
+tools/            # verify.mjs（279 项断言）、install.mjs（离线安装 / 冲突检测）、linux-verify.sh
 docs/             # 宿主实测（preflight.md）与验收证据（acceptance.md）
 site/             # Astro + Starlight 文档站，单独部署
 .github/          # CI 与发布 workflow

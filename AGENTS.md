@@ -6,9 +6,11 @@
 ## 命令
 
 ```pwsh
-node tools/verify.mjs                # 260 项断言（A–I）；跑在临时 <config> 下，不碰真实配置
-node tools/verify.mjs --section G    # 只跑一段（A–I，按标题前缀匹配，大小写不敏感）
-node tools/install.mjs               # 幂等安装到 <config>/plugins/skill_management.js
+node tools/verify.mjs                # 279 项断言（A–J）；跑在临时 <config> 下，不碰真实配置
+node tools/verify.mjs --section G    # 只跑一段（A–J，按标题前缀匹配，大小写不敏感）
+node tools/install.mjs               # 装/升级单文件副本；有 npm 条目或第二份副本时拒绝写（退出 2）
+node tools/install.mjs --check       # 只报告：落点、版本、两处来源（不写文件）
+node tools/install.mjs --uninstall   # 只删 <config>/plugins/skill_management.js 这一个文件
 bash tools/linux-verify.sh           # Linux/WSL 全量验收：自带 Node/opencode，落 $HOME 下，跑完自清（无 sudo）
 ```
 
@@ -35,6 +37,7 @@ bash tools/linux-verify.sh           # Linux/WSL 全量验收：自带 Node/open
 
 ## 最容易踩的坑
 
+- **同一插件双来源 = 加载失败，不是“都能用”**：npm 条目（`opencode.jsonc` 的 `plugins`）和 `<config>/plugins/skill_management.js` 同时存在时，宿主报 `Duplicate plugin ID: skill_management`，其中一份直接 failed。改动 `tools/install.mjs` 或安装文档时别把这条写回“后加载覆盖前者”。实测记录见 `docs/preflight.md` 末尾那一节，回归用例是 `tools/verify.mjs` 的 J 段。
 - **插件目录里不能放第二个 `.js`**：宿主会把 `plugin` / `plugins` 目录下的每个 `.js` / `.ts` 文件**和子目录**都当插件加载，辅助代码拆出去会直接被当成插件而校验失败。所以插件是单文件。
 - **`ctx.skill.list()` / `ctx.agent.list()` 返回 `{location, data}` 信封，不是数组。** 拿注册表要用 `ctx.<域>.transform(draft => draft.list())`，并 `dispose()` 掉返回的注册（否则每次调用都留一个 hook）。
 - **唯一真源是宿主二进制 + `opencode debug *`，不是 npm 类型包。** 本机 `@opencode-ai/plugin` 是 1.18.18 而宿主是 2.0.32：其 v2 类型**没有 `ctx.tool`**，`SkillV2Info` 用的是 `location`（真实字段是 `path`），`ToolContext` 也没有真实的 `progress`。按那些类型写会直接错。
