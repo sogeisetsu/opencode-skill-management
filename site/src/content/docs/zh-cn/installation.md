@@ -27,18 +27,32 @@ opencode plugin add opencode-skill-management
 
 npm 包只导出一个入口：`./src/skill_management.js`。运行时依赖：无。
 
-## 通道三 —— 直接复制单文件
+## 通道三 —— 直接复制单文件（不跟 npm 更新）
 
 离线机器或自建分发更适合这条通道：
 
 ```pwsh
 node tools/install.mjs          # 复制到 <config>/plugins/skill_management.js
-node tools/install.mjs --dry-run
+node tools/install.mjs --check  # 只报告：落点、版本、有没有冲突
 ```
 
-安装器是幂等的：目标文件内容逐字节相同就什么都不做。`<config>` 在设置了
-`$XDG_CONFIG_HOME` 时是 `$XDG_CONFIG_HOME/opencode`，否则是 `~/.config/opencode`
-（Windows 上是 `C:\Users\<你>\.config\opencode`）。
+这条通道是**锁版本**的：装进去的那份一直用到你重新跑安装器为止。它不跟 npm 发布走，升级就是再跑
+一次 `node tools/install.mjs`。想要自动更新就用通道一或通道二，升级交给宿主的
+`opencode plugin check` / `opencode plugin update`。
+
+`<config>` 的解析顺序与宿主一致：`$OPENCODE_CONFIG_DIR` → `$XDG_CONFIG_HOME/opencode` →
+`~/.config/opencode`（Windows 上是 `C:\Users\<你>\.config\opencode`）。
+
+写任何文件之前，安装器先看有没有第二个来源。`opencode.json(c)` 的 `plugins` 里已经列了本包，
+或者 `plugins/` 里还躺着另一份副本时，它拒绝写入、返回退出码 `2`，所有文件保持原样。
+
+| 参数 | 作用 |
+|---|---|
+| `--check` / `--dry-run` | 只报告，不写任何文件 |
+| `--uninstall` | 只删 `<config>/plugins/skill_management.js`（内容不像本插件就拒绝） |
+| `--npm` | 断言走 npm 渠道，永不写文件；没找到渠道退出 `1` |
+| `--force` | 无视冲突照写（会制造两份，宿主会给其中一份报 `Duplicate plugin ID`） |
+| `--json` | 机器可读输出 |
 
 OpenCode 会加载 `<config>/plugins/` 下的每个 `.js`、`.ts` 文件以及子目录。不需要在
 `opencode.jsonc` 里登记。
@@ -46,6 +60,14 @@ OpenCode 会加载 `<config>/plugins/` 下的每个 `.js`、`.ts` 文件以及�
 :::caution[插件目录必须保持单文件]
 `plugins/` 下的每个文件都会被当成插件加载。不要把 `skill_management` 拆成辅助模块，也不要
 在旁边放第二份副本。分发形态刻意保持单文件，原因就在这里。
+:::
+
+:::caution[一份插件只能走一条通道]
+同一个 plugin id 只能被加载一次。npm 条目和 `<config>/plugins/skill_management.js` 同时存在时，
+宿主会报 `Duplicate plugin ID: skill_management`，其中一份显示为加载失败——不是“两份都能用”。
+改走 npm：先 `node tools/install.mjs --uninstall`。改回单文件：先
+`opencode plugin remove opencode-skill-management`。拿不准先跑
+`node tools/install.mjs --check`，它会列出两处来源和该跑哪条命令。
 :::
 
 ## 确认已加载

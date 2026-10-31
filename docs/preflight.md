@@ -296,3 +296,40 @@ opencode run --standalone --auto --format json '调用原生工具 skill_managem
 ```
 
 第二条尤其关键：**错误分支也通过了 output 校验**，没有被宿主的 schema 校验拦下。
+
+# 附：同一插件双来源 → `Duplicate plugin ID`（2026-10-31 实测，宿主 v2.2.0）
+
+**现象。** 同一台机器上通过两条通道装了同一份插件：
+
+- `<config>/plugins/skill_management.js`（`node tools/install.mjs` 写的单文件副本）
+- `opencode.jsonc` 的 `plugins` 数组里 `"opencode-skill-management@1.1.0"`（marketplace 装的 npm 包）
+
+两份文件**逐字节相同**（`42443121FC5234C5FEF9B2CC5B2856C28C9A6D5EAA0AE580E473BECF2D05DE7F`）。
+宿主仍然在一次加载里只接受一份，界面（OpenChamber「已安装插件」卡片）显示：
+
+```text
+加载失败
+Duplicate plugin ID: skill_management
+```
+
+**判据。** 删掉 `plugins/skill_management.js` 之后，在新进程里复验：
+
+```pwsh
+opencode run --standalone --auto --format json '用 skill_management 工具列出已安装 skill，不要用 execute / Code Mode 工具'
+# tool_use status=completed
+# {"schemaVersion":1,"action":"list","ok":true,…}   33 个 skill，0 disabled / 0 ask
+# sidecar ok、consistency 三项均为空
+```
+
+**结论（已证实）。**
+
+- 「同一 plugin id 只能有一份」是硬约束，不是「两份都能用、只是看错版本」。文档里早期那句
+  “后加载的覆盖前者”是错的，已按此结论改写 README 与文档站安装页。
+- 报错归属在**后加载**的那一份上：症状表现为 npm/marketplace 那条失败，而目录副本活着。
+  因此“谁活着”不能当作判断依据，只能靠 `opencode plugin list --builtin` 看 source。
+- `tools/install.mjs` 因此改为**先检测再写**：`opencode.json(c)` 的 `plugins` 里已有本包、
+  或同一批被扫描目录里已有第二份副本时，拒绝写入并返回退出码 `2`（详见 README 参数表与
+  `verify.mjs` 的 J 段）。
+
+**待复核（未验证）。** 去重发生的位置在宿主二进制里有两条路径（一条保留先到者、把后者标 failed；
+另一条直接抛错）。本次只观察到“保留先到者”这一条，升级宿主后需重测。
