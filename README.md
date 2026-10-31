@@ -50,7 +50,7 @@ node tools/install.mjs                                                 # 离线�
 - 兼容性、1.x 承诺与升级说明：[Compatibility](https://sogeisetsu.github.io/opencode-skill-management/compatibility/)
 - 设计规范：[.openchamber/plans/skill-management-spec.md](https://github.com/sogeisetsu/opencode-skill-management/blob/main/.openchamber/plans/skill-management-spec.md)
 - 宿主实测与踩过的坑：[docs/preflight.md](https://github.com/sogeisetsu/opencode-skill-management/blob/main/docs/preflight.md)
-- 验收证据与开发流程：[docs/acceptance.md](https://github.com/sogeisetsu/opencode-skill-management/blob/main/docs/acceptance.md) · [开发与验收（326 项断言 A–J）](https://sogeisetsu.github.io/opencode-skill-management/development/)
+- 验收证据与开发流程：[docs/acceptance.md](https://github.com/sogeisetsu/opencode-skill-management/blob/main/docs/acceptance.md) · [开发与验收（333 项断言 A–J）](https://sogeisetsu.github.io/opencode-skill-management/development/)
 - 版本变更：[CHANGELOG.md](./CHANGELOG.md)
 
 MIT © 2026 sogeisetsu

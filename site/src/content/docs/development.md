@@ -9,7 +9,7 @@ runs against a temporary config directory.
 ## Run the harness
 
 ```pwsh
-node tools/verify.mjs                # all sections, 326 assertions
+node tools/verify.mjs                # all sections, 333 assertions
 node tools/verify.mjs --section E    # one section (A–J, by title prefix, case-insensitive)
 node tools/verify.mjs --keep         # keep the temporary directory for inspection
 ```
@@ -28,7 +28,7 @@ running instance's npm channel cannot be mistaken for an installed one.
 | C | Id derivation from paths, source classification, `user` / `project` scope |
 | D | JSONC text edits: insert, remove, create the block, CRLF, BOM, comments preserved, strict validation, failure paths |
 | D2 | Target config resolution under a fake `env` / `home`: XDG, home, two candidates, two directories |
-| E | End-to-end on a temporary config: `list`, `inspect`, `dryRun`, `disable`, `enable`, backup, sidecar, read-back verification, refusal branches, and `OUTPUT_SCHEMA` validation of every action's `output` |
+| E | End-to-end on a temporary config: `list`, `inspect`, `dryRun`, `disable`, `enable`, backup, sidecar, read-back verification, refusal branches, concurrent writes against the same file, and `OUTPUT_SCHEMA` validation of every action's `output` |
 | F | Id derivation from the registry (§3.5) and the ownership boundary of `enable` |
 | G | Read-back criteria, one backup, atomic write, description hardening |
 | H | Performance gate |

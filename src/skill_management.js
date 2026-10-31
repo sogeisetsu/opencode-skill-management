@@ -1833,6 +1833,33 @@ const INPUT_SCHEMA = {
 }
 
 // ─────────────────────────────────────────────────────────────
+// 写路径互斥
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 宿主会在同一个 step 里**并发**执行多个工具调用（实测把 disable 与 enable 放在一步里发出，
+ * 两个 execute 同时在跑）。两边都是「读文件 → 改文本 → 回读校验 → 写 sidecar」，
+ * 并发时后写的会覆盖先写的：一边回滚会把另一边刚写入的规则写回去，最后留下一条本不该存在的规则。
+ *
+ * 这里把整个写动作串行化：后到的调用等前一个走完（含回读轮询）再开始，于是它读到的一定是
+ * 前一个的结果 —— 第二个 disable 看到 already_disabled，enable 看到的就是那条标记规则。
+ * 只解决同一进程内的并发；两个宿主进程同时改同一个文件仍可能互相覆盖（那不是插件能锁住的）。
+ */
+let writeTail = Promise.resolve()
+
+function withWriteLock(fn) {
+  const prev = writeTail
+  let release
+  writeTail = new Promise((resolve) => {
+    release = resolve
+  })
+  return prev.then(
+    () => fn().finally(release),
+    () => fn().finally(release),
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
 // 插件入口
 // ─────────────────────────────────────────────────────────────
 
@@ -1861,9 +1888,9 @@ export default {
               case "inspect":
                 return wrap(await actInspect(scoped, id, name))
               case "disable":
-                return wrap(await actDisable(scoped, id, name, effect, dryRun))
+                return wrap(await withWriteLock(() => actDisable(scoped, id, name, effect, dryRun)))
               case "enable":
-                return wrap(await actEnable(scoped, id, name, dryRun))
+                return wrap(await withWriteLock(() => actEnable(scoped, id, name, dryRun)))
               default:
                 return wrap(failResult(action, "unknown_action", `未知动作 \`${input.action ?? "(缺失)"}\`。可用：list / inspect / disable / enable。`))
             }

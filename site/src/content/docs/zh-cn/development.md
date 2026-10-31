@@ -8,7 +8,7 @@ description: 验收脚本的分段与闸门、CI 矩阵、npm 包里有什么，
 ## 跑验收
 
 ```pwsh
-node tools/verify.mjs                # 全量，326 项断言
+node tools/verify.mjs                # 全量，333 项断言
 node tools/verify.mjs --section E    # 只跑一段（A–J，按标题前缀匹配，大小写不敏感）
 node tools/verify.mjs --keep         # 不删除临时目录（排查用）
 ```
@@ -26,7 +26,7 @@ node tools/verify.mjs --keep         # 不删除临时目录（排查用）
 | C | 从路径反推 id、来源归类、`user` / `project` 作用域 |
 | D | JSONC 文本编辑：插入、删除、新建块、CRLF、BOM、保留注释、严格校验、失败路径 |
 | D2 | 用假 `env` / `home` 测目标文件解析：XDG、家目录、两个候选、两个目录 |
-| E | 临时配置上的端到端：`list`、`inspect`、`dryRun`、`disable`、`enable`、备份、sidecar、回读校验、拒绝分支，以及按 `OUTPUT_SCHEMA` 校验每个动作的 `output` |
+| E | 临时配置上的端到端：`list`、`inspect`、`dryRun`、`disable`、`enable`、备份、sidecar、回读校验、拒绝分支、同一文件的并发写，以及按 `OUTPUT_SCHEMA` 校验每个动作的 `output` |
 | F | 从注册表反推 id（§3.5）与 `enable` 的归属边界 |
 | G | 回读判据、只留一份备份、原子写、description 硬化 |
 | H | 性能闸门 |

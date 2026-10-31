@@ -1172,6 +1172,40 @@ async function call(action, args = {}) {
     cfgsWrite(ORIGINAL)
   }
 
+  // N22/N23 写路径互斥：同一 step 里并发发起的写操作不得互相覆盖（宿主会并行执行工具调用）
+  {
+    const sideFile = path.join(tmpConfigDir, "skill_management.state.json")
+    cfgsWrite(ORIGINAL)
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    const [d, e] = await Promise.all([call("disable", { id: "windows-shell" }), call("enable", { id: "windows-shell" })])
+    ok("N22 并发 disable + enable：两个结果都是合法 JSON 且 ok:true", d.json.ok === true && e.json.ok === true, `${d.text}\n---\n${e.text}`)
+    ok(
+      "N22 并发后配置逐字节还原（不再留下本应被回滚的规则）",
+      fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")),
+      fs.readFileSync(CFG, "utf8"),
+    )
+    ok("N22 并发后 sidecar 无残留记录", JSON.parse(fs.readFileSync(sideFile, "utf8")).rules.length === 0, fs.readFileSync(sideFile, "utf8"))
+
+    cfgsWrite(ORIGINAL)
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    const [d1, d2] = await Promise.all([call("disable", { id: "windows-shell" }), call("disable", { id: "windows-shell" })])
+    const written = fs.readFileSync(CFG, "utf8")
+    ok(
+      "N23 并发 disable + disable：只有一条规则，且只有一个 changed:true",
+      (written.match(/"resource": "windows-shell"/g) ?? []).length === 1 && [d1, d2].filter((r) => r.json.changed === true).length === 1,
+      `${written}\n---\n${d1.text}\n---\n${d2.text}`,
+    )
+    ok(
+      "N23 并发 disable + disable：另一个是 already_disabled 的空操作",
+      [d1, d2].filter((r) => r.json.changed === false).every((r) => r.json.reason === "already_disabled"),
+      `${d1.text}\n---\n${d2.text}`,
+    )
+    const sideAfter = JSON.parse(fs.readFileSync(sideFile, "utf8"))
+    ok("N23 并发 disable + disable：sidecar 只有一条记录", sideAfter.rules.filter((r) => r.id === "windows-shell").length === 1, JSON.stringify(sideAfter))
+    const clean = await call("enable", { id: "windows-shell" })
+    ok("N23 收尾：互斥释放后仍能正常 enable 并逐字节还原", clean.json.ok === true && fs.readFileSync(CFG).equals(Buffer.from(ORIGINAL, "utf8")), clean.text)
+  }
+
   // 声明 output 后：结果必须带 output，且字段满足声明的必需项
   {
     const ctx = makeCtx()

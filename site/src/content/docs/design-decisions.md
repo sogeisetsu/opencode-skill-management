@@ -72,6 +72,21 @@ a lost or corrupt sidecar, and it is the first thing `enable` looks for. Its for
 comments from your config, the marker is gone — `enable` then falls back to the sidecar record, or
 refuses rather than guessing.
 
+## Why writes are serialized
+
+The host can run several tool calls from one step **concurrently**. Two write actions racing on the
+same file interleave read → edit → verify → record, and the later rollback can write the earlier
+change back: the file ends up holding a rule that should not exist.
+
+Every `disable` / `enable` runs inside an in-process queue now, so the second call starts only after
+the first — including its read-back polling — has finished, and therefore reads the first call's
+result.
+
+**The cost.** A second write waits instead of being rejected, and verification can take several
+seconds, so a concurrent call is delayed by that much. The queue is per host process: two separate
+OpenCode processes editing the same config can still overwrite each other, which is outside what a
+plugin can lock.
+
 ## Why the sidecar is only an audit trail
 
 `<config>/skill_management.state.json` records id, effect, file and timestamp for rules this tool
