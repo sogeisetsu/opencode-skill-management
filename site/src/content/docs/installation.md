@@ -8,8 +8,8 @@ channel fits your setup; all three result in the same code.
 
 ## Requirements
 
-- OpenCode **V2**. Version 1.1.0 was accepted on host 2.0.32 on Windows and Linux, including
-  new-process end-to-end runs.
+- OpenCode **V2**. 1.1.0 was accepted on host 2.0.32 on Windows and Linux; 1.2.0 was re-checked on
+  host 2.2.0, including a new-process end-to-end run.
 - Node.js **18 or newer** in the environment that runs OpenCode.
 - No token, registry account or build step is needed.
 

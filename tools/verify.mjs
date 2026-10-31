@@ -1711,7 +1711,7 @@ section("J install.mjs 冲突检测")
   // J18 副本落后时给出提示
   const t18 = mk("lag")
   run(t18, [])
-  fs.writeFileSync(t18.dest, fs.readFileSync(srcFile, "utf8").replace('PLUGIN_VERSION = "1.1.0"', 'PLUGIN_VERSION = "0.9.0"'))
+  fs.writeFileSync(t18.dest, fs.readFileSync(srcFile, "utf8").replace(`PLUGIN_VERSION = "${mod.PLUGIN_VERSION}"`, 'PLUGIN_VERSION = "0.9.0"'))
   const r18 = run(t18, ["--check"])
   ok("J18 副本落后仓库时提示升级", r18.code === 0 && /落后仓库/.test(r18.text), `code=${r18.code} ${r18.text}`)
 

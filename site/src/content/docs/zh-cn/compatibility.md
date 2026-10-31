@@ -7,7 +7,7 @@ description: 宿主与运行时支持范围、1.x 内不破坏什么，以及明
 
 | 面 | 状态 |
 |---|---|
-| OpenCode V2 | 支持。1.1.0 在宿主 **2.0.32** 上完成验收。 |
+| OpenCode V2 | 支持。1.1.0 在宿主 **2.0.32** 上完成验收（Windows + Linux）；1.2.0 在宿主 **2.2.0** 上用新进程复核（Windows）。 |
 | OpenCode V1 | 不针对，未测试。 |
 | Windows | 已验证，包含新进程端到端。 |
 | Linux | 已验证，包含新进程端到端。 |
@@ -70,6 +70,6 @@ description: 宿主与运行时支持范围、1.x 内不破坏什么，以及明
 
 ## 版本
 
-当前版本 **1.1.0**。npm 包名 `opencode-skill-management`，仓库
+当前版本 **1.2.0**。npm 包名 `opencode-skill-management`，仓库
 [sogeisetsu/opencode-skill-management](https://github.com/sogeisetsu/opencode-skill-management)。
 MIT 许可。

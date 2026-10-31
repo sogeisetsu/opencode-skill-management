@@ -2,7 +2,7 @@
 
 给 OpenCode 的 skill 装一个开关：**列出、诊断、停用、恢复** —— 全部通过全局权限规则实现，不删除、不移动、不改写任何 skill 文件。
 
-> 适配 OpenCode V2（在 2.0.32 上验收：Windows 与 Linux 双平台 + 新进程真机 e2e）。单文件、纯 Node 内置模块、无第三方依赖、不调用 shell。
+> 适配 OpenCode V2（2.0.32 上完成 Windows + Linux 双平台验收；1.2.0 在 2.2.0 上做新进程真机复核）。单文件、纯 Node 内置模块、无第三方依赖、不调用 shell。
 >
 > **1.x 兼容承诺**：四个动作（`list` / `inspect` / `disable` / `enable`）的入参、JSON 输出信封（`schemaVersion` / `action` / `ok` / `warnings`）与各动作字段、写入的规则形状 `{ "action": "skill", "resource": <id>, "effect": "deny"|"ask" }`、规则行的同行 marker 注释、单文件结构 —— 1.x 内不破坏（`enable` 的归属判定依赖 marker 格式）。
 >
