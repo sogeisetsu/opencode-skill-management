@@ -7,7 +7,7 @@ description: Host and runtime support, what 1.x promises not to break, and what 
 
 | Surface | Status |
 |---|---|
-| OpenCode V2 | Supported. 1.1.0 was accepted on host **2.0.32**. |
+| OpenCode V2 | Supported. 1.1.0 was accepted on host **2.0.32** (Windows and Linux); 1.2.0 was re-checked on host **2.2.0** (Windows) in a new process. |
 | OpenCode V1 | Not targeted; not tested. |
 | Windows | Verified, including new-process end-to-end runs. |
 | Linux | Verified, including new-process end-to-end runs. |
@@ -53,16 +53,19 @@ the envelope, the field names, and the literal values (ids, effects, rule JSON, 
 - **No network access.** The plugin never calls out, and the docs site has no analytics, no
   cookies, and no language-based redirect.
 
-## How 1.1.0 was verified
+## How this release was verified
 
-- `node tools/verify.mjs`: 260 assertions in sections A–I, run entirely against a temporary
-  config directory (no real user config touched). Section E parses every result as JSON and
-  checks it against the declared `output` contract.
+- `node tools/verify.mjs`: **326 assertions** in sections A–J, run entirely against a temporary
+  config directory (no real user config touched). Section E parses every result and validates it
+  against the declared `output` contract.
 - The same harness runs on `ubuntu-latest` and `windows-latest` in CI.
 - End-to-end checks run in a **new process**, because plugins load at host startup.
 - Section H is a performance gate: `list` under 25 ms at 29 skills × 12 agents × 10 rules.
 - Section I is a release gate: pack contents, resolvable `exports`, and byte-identical installed
   copy.
+
+Full details, plus the Linux/WSL acceptance script, are on
+[Development & verification](../development/).
 
 Those checks are about the plugin. The documentation site is built separately with Astro and
 Starlight and deployed to GitHub Pages.
@@ -78,6 +81,6 @@ Starlight and deployed to GitHub Pages.
 
 ## Version
 
-The current release is **1.1.0**. The npm package is `opencode-skill-management`; the
+The current release is **1.2.0**. The npm package is `opencode-skill-management`; the
 repository is [sogeisetsu/opencode-skill-management](https://github.com/sogeisetsu/opencode-skill-management).
 Licensed MIT.

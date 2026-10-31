@@ -74,6 +74,29 @@ rules[1] { action: "skill", resource: "windows-shell", effect: "deny"  }
 | `ask` | 列出 | 询问确认 |
 | `deny` | 隐藏 | 拒绝（`permission.rejected`） |
 
+### deny 与 ask 的区别
+
+两者都能让 skill 不被悄悄加载，但拦住的位置不同。
+
+| | `deny` | `ask` |
+|---|---|---|
+| 模型可见列表 | 隐藏 | 仍在列表里，描述也还在 |
+| 加载尝试 | 拒绝（`permission.rejected`） | 卡在确认上 |
+| 打断这一轮 | 不会 —— 直接失败 | 会 —— 要有人回答 |
+| 谁能覆盖 | 调用者自己规则集里更靠后的规则（如 agent 级 `allow`），或 `policies` 条目 | 调用者自己规则集里更靠后的规则 |
+| 典型用途 | 完全不想让它进入上下文的 skill | 用得上、但不该由模型自作主张调用的 skill |
+
+`ask` 不是「弱一点的 `deny`」。它**不降低**模型尝试使用这个 skill 的概率：skill 仍在列表里、
+仍有描述、仍是候选。`ask` 换来的是一个决定点，代价是一次打断。
+
+三个真实例子，以及这样选效果的理由：
+
+| Skill | 为什么要开关 | 选的效果 |
+|---|---|---|
+| `codebuddy-second-opinion` | 调另一个模型，花额度 / credits | `ask` —— 你主动要第二意见时有用，模型自己想起来就是浪费 |
+| `disk-clean` | 扫缓存并**真的删文件** | `ask` 让人过一眼；不想让模型碰就 `deny` |
+| `meld-deepresearch` | 联网 + 长耗时 | `deny` —— 误调的代价远高于那点便利 |
+
 粒度是 skill **id**，不是某个文件或某次调用。id 不存在时报
 `Unable to load skill <id>`，这与权限拒绝是两个不同的错误。
 
@@ -85,7 +108,7 @@ rules[1] { action: "skill", resource: "windows-shell", effect: "deny"  }
 
 典型分歧：全局配置 deny 了某个 skill，但某个 agent 自己有更靠后的 `allow`，或反过来。此时：
 
-- `list` 显示调用者的状态，并提示其它 agent 不同。
+- `list` 显示调用者的状态，并提示其它**可见** agent 不同（隐藏的内部 agent 只在 `inspect` 里列出）。
 - `inspect` 在 `agents[]` 里返回逐 agent 结果。
 - `disable` 会说明规则确实写入、但调用者实际效果仍不同，而不是谎称成功。
 

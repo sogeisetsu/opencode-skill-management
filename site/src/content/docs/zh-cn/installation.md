@@ -7,7 +7,7 @@ description: 三条加载通道（git spec、npm、单文件）以及如何确�
 
 ## 环境要求
 
-- OpenCode **V2**。1.1.0 在宿主 2.0.32 上完成验收，覆盖 Windows 与 Linux，包含新进程端到端。
+- OpenCode **V2**。1.1.0 在宿主 2.0.32 上完成验收（Windows 与 Linux）；1.2.0 在 2.2.0 上复核，包含新进程端到端。
 - 运行 OpenCode 的环境需要 Node.js **18 或更新版本**。
 - 不需要 token、注册表账号或构建步骤。
 

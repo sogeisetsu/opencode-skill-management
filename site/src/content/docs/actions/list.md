@@ -24,10 +24,10 @@ One JSON object. Every action starts with the same envelope:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `schemaVersion` | number | `1` in 1.1.0. |
+| `schemaVersion` | number | `1` in 1.2.0. |
 | `action` | string | `"list"`. |
 | `ok` | boolean | `true` when the registry and config were read. |
-| `warnings` | string[] | Human-readable notes (Chinese in 1.1.0); empty when there is nothing to report. |
+| `warnings` | string[] | Human-readable notes (Chinese in 1.2.0); empty when there is nothing to report. |
 
 `list` adds:
 
@@ -38,7 +38,7 @@ One JSON object. Every action starts with the same envelope:
 | `summary.total` | number | Registered skills. |
 | `summary.disabled` | number | Skills whose caller effect is `deny`. |
 | `summary.ask` | number | Skills whose caller effect is `ask` (explicit or host fallback). |
-| `summary.diverged` | number | Skills whose effect differs under at least one other agent. |
+| `summary.diverged` | number | Skills whose effect differs under at least one other **visible** agent. `hidden` internal agents (`title`, `summary`, …) are excluded; their detail is still in `inspect.agents[]`. |
 | `summary.derivedIds` | number | Ids derived from paths because the registry supplied none. |
 | `skills[]` | object[] | One entry per skill, sorted by id. |
 | `skills[].id` | string \| null | Registry id, or derived from the path. `null` when neither exists. |
@@ -61,7 +61,7 @@ One JSON object. Every action starts with the same envelope:
 | `consistency.unrecordedRules` | object[] | Config `skill` rules the sidecar does not know: `resource`, `effect`. |
 | `consistency.missingFromRegistry` | string[] | Recorded ids that are no longer registered. |
 
-Skill bodies are never included. Messages inside `warnings` are Chinese in 1.1.0; field names and
+Skill bodies are never included. Messages inside `warnings` are Chinese in 1.2.0; field names and
 values above are the stable part.
 
 ## Reading `state`
@@ -83,7 +83,7 @@ State is computed per agent on purpose. Merging all agents' rules would leak a s
   "schemaVersion": 1,
   "action": "list",
   "ok": true,
-  "warnings": ["另有 2 个 skill 在其它 agent 下状态不同（逐 agent 明细见 inspect）。"],
+  "warnings": ["另有 2 个 skill 在其它可见 agent 下状态不同（逐 agent 明细见 inspect）。"],
   "callerAgent": { "id": "build", "verified": true },
   "summary": { "total": 29, "disabled": 1, "ask": 0, "diverged": 2, "derivedIds": 0 },
   "skills": [

@@ -78,6 +78,30 @@ That fallback is why `ask` is ambiguous:
 | `ask` | Listed | Asks for confirmation |
 | `deny` | Hidden | Rejected (`permission.rejected`) |
 
+### deny vs ask
+
+Both stop a skill from being loaded silently, but they stop it in different places.
+
+| | `deny` | `ask` |
+|---|---|---|
+| Model-visible list | Hidden | Still listed, still described |
+| Load attempt | Rejected (`permission.rejected`) | Blocks on a confirmation |
+| Interrupts the turn | No — it just fails | Yes — someone has to answer |
+| Who can override | A later rule in the caller's own rule set (e.g. an agent-level `allow`), or a `policies` entry | A later rule in the caller's own rule set |
+| Typical use | A skill you do not want in context at all | A skill that is fine to use, but not on its own initiative |
+
+`ask` is not simply a softer `deny`. It does **not** reduce the probability that the model tries to
+use the skill: the skill is still in the list, still described, still a candidate. What `ask` buys
+is a decision point; what it costs is an interruption.
+
+Three real cases, and the reasoning that picks an effect:
+
+| Skill | Why it needs a switch | Effect |
+|---|---|---|
+| `codebuddy-second-opinion` | Shells out to another model and spends quota/credits | `ask` — useful when you asked for a second opinion, wasteful when the model decides on its own |
+| `disk-clean` | Scans caches and actually deletes files | `ask` for review; `deny` if you never want the model reaching for it |
+| `meld-deepresearch` | Network access and long, expensive runs | `deny` — a mistaken invocation costs far more than the convenience is worth |
+
 The granularity is the skill **id**, not an individual file or invocation. A skill whose id does
 not exist fails with `Unable to load skill <id>`, which is a different error from a permission
 rejection.
@@ -91,7 +115,7 @@ never merges every agent's rules into one list. Merging is wrong because sub-age
 A typical divergence: the global config denies a skill, but one agent has its own later `allow`
 or vice versa. In that case:
 
-- `list` shows the caller's state and says other agents differ.
+- `list` shows the caller's state and says other **visible** agents differ (hidden internal agents are only listed in `inspect`).
 - `inspect` returns the per-agent results in `agents[]`.
 - `disable` reports that the rule was written but the caller's actual effect is still different,
   instead of claiming success.

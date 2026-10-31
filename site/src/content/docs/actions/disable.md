@@ -77,7 +77,7 @@ The usual envelope (`schemaVersion`, `action`, `ok`, `warnings`) plus:
 | `createdBlock` | boolean | Whether a new `permissions` block was created. |
 | `diff` | string[] | The exact changed lines that were (or would be) written. |
 | `backup` | string \| null | Backup path, when the target existed. |
-| `sidecar` | string | Sidecar path written on success. |
+| `sidecar` | string \| null | Sidecar path written on success; `null` when the sidecar could not be written (the config change still stands and `warnings` explains it). |
 | `verification` | object | `ok`, `via`, `caller`, `expected`, `actual`, `beforeCount`, `count`, `diverged`. |
 
 `verification.via` names the reload/poll path and includes the exact-rule count transition

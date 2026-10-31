@@ -72,6 +72,69 @@ function parseStrict(text) {
   return JSON.parse(chars.join(""))
 }
 
+/**
+ * 按插件声明的 OUTPUT_SCHEMA 校验一份 output。
+ * 只断言信封四字段是不够的：schema 声明了 id/effect/reason/message 为 string、
+ * changed/dryRun 为 boolean，塞 null 也曾经全绿，而真机宿主会直接报
+ * `Tool did not return its declared output`。这里覆盖 required、properties 的 JSON 类型、
+ * 数组 items 与 error.{code,message}。
+ */
+function jsonTypeOf(v) {
+  if (v === null) return "null"
+  if (Array.isArray(v)) return "array"
+  if (typeof v === "number") return Number.isInteger(v) ? "integer" : "number"
+  return typeof v
+}
+
+function schemaProblems(schema, value, at = "output") {
+  const problems = []
+  if (!schema || typeof schema !== "object") return problems
+  if (schema.type) {
+    const actual = jsonTypeOf(value)
+    const want = Array.isArray(schema.type) ? schema.type : [schema.type]
+    // JSON Schema 的 number 接受整数；integer 不接受小数
+    const okType = want.some((t) => t === actual || (t === "number" && actual === "integer"))
+    if (!okType) {
+      problems.push(`${at}：期望 ${want.join("|")}，实际 ${actual}（${JSON.stringify(value)}）`)
+      return problems
+    }
+  }
+  if (Array.isArray(schema.required) && value && typeof value === "object") {
+    for (const k of schema.required) if (!(k in value)) problems.push(`${at}.${k}：缺失必需字段`)
+  }
+  if (schema.properties && value && typeof value === "object" && !Array.isArray(value)) {
+    for (const [k, sub] of Object.entries(schema.properties)) {
+      if (!(k in value)) continue
+      problems.push(...schemaProblems(sub, value[k], `${at}.${k}`))
+    }
+  }
+  if (schema.items && Array.isArray(value)) {
+    value.forEach((v, i) => problems.push(...schemaProblems(schema.items, v, `${at}[${i}]`)))
+  }
+  return problems
+}
+
+/** 每个动作都要过：output 满足 schema，且 content 与 output 是同一份数据 */
+function checkOutput(label, r) {
+  // 兼容两种传法：call() 的包装对象，或工具原始返回 { output, content }
+  const res = r && r.res && typeof r.res === "object" && "output" in r.res ? r.res : r
+  const output = res && res.output
+  const content = res && res.content
+  const problems = schemaProblems(mod.OUTPUT_SCHEMA, output)
+  ok(`${label}：output 满足 OUTPUT_SCHEMA`, problems.length === 0, problems.join("; ") || JSON.stringify(output))
+  let parsed
+  try {
+    parsed = JSON.parse(content)
+  } catch {
+    parsed = undefined
+  }
+  ok(
+    `${label}：content 与 output 是同一份数据`,
+    parsed !== undefined && JSON.stringify(parsed) === JSON.stringify(output),
+    content && content.slice(0, 200),
+  )
+}
+
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sm-verify-"))
 const keep = process.argv.includes("--keep")
 
@@ -638,9 +701,24 @@ async function call(action, args = {}) {
     ok("别的 agent 全 deny 不影响调用者：统计仍是 0 disabled", t.summary.disabled === 0, JSON.stringify(t.summary))
     ok("别的 agent 全 deny 时 state 仍全是 available", t.skills.every((s) => s.state === "available"), JSON.stringify(t.skills.map((s) => s.state)))
     ok(
-      "提示其它 agent 下的差异",
-      t.summary.diverged === 5 && t.warnings.some((w) => w.includes("另有 5 个 skill 在其它 agent 下状态不同")),
-      JSON.stringify(t.summary),
+      "隐藏 agent（title）的 {*,*,deny} 不计入 diverged（1.1.0 之前 33/33 全报）",
+      t.summary.diverged === 0 && !t.warnings.some((w) => w.includes("状态不同")),
+      JSON.stringify({ summary: t.summary, warnings: t.warnings }),
+    )
+    const inspTitle = (await callWith({ withTitleDeny: true }, "inspect", { id: "grill-me" })).json
+    ok(
+      "隐藏 agent 仍出现在 inspect.agents[]（明细不丢）",
+      inspTitle.agents.some((a) => a.id === "title") && inspTitle.divergentAgents.some((d) => d.id === "title"),
+      JSON.stringify(inspTitle.agents),
+    )
+  }
+  {
+    // 可见 agent 之间规则不同 → 必须计数并告警（修掉隐藏 agent 噪音后不能把真差异也漏掉）
+    const t = (await callWith({ agentRules: { plan: [{ action: "skill", resource: "grill-me", effect: "deny" }] } }, "list")).json
+    ok(
+      "可见 agent 规则不同 → diverged 正确计数且告警出现",
+      t.summary.diverged === 1 && t.warnings.some((w) => w.includes("另有 1 个 skill 在其它可见 agent 下状态不同")),
+      JSON.stringify({ summary: t.summary, warnings: t.warnings }),
     )
   }
   {
@@ -682,6 +760,59 @@ async function call(action, args = {}) {
   {
     const missing = (await call("inspect", { id: "no-such-skill" })).json
     ok("inspect 找不到时 ok:false + skill_not_found", missing.ok === false && missing.error.code === "skill_not_found", JSON.stringify(missing))
+  }
+
+  // 1.1.0 review #2：frontmatter 的布尔值不得被 Boolean() 强转（"false" 是字符串，Boolean("false") === true）
+  {
+    const quotedFalse = "---\nname: quoted-flag\ndescription: d\ndisable-model-invocation: \"false\"\n---\nbody\n"
+    const fmSkills = [
+      {
+        id: "quoted-flag",
+        name: "quoted-flag",
+        autoinvoke: false,
+        path: path.join(tmpConfigDir, "skills", "quoted-flag", "SKILL.md"),
+        content: quotedFalse,
+      },
+    ]
+    const inspFm = (await callWith({ skills: fmSkills }, "inspect", { id: "quoted-flag" })).json
+    ok(
+      "带引号的 disable-model-invocation: \"false\" 不得报成 true",
+      inspFm.skill.frontmatter.disableModelInvocation === false,
+      JSON.stringify(inspFm.skill.frontmatter),
+    )
+    ok(
+      "同一份 frontmatter：autoinvoke 与 disableModelInvocation 结论一致",
+      inspFm.skill.autoinvoke === false,
+      JSON.stringify({ autoinvoke: inspFm.skill.autoinvoke, fm: inspFm.skill.frontmatter }),
+    )
+    const listFm = (await callWith({ skills: fmSkills }, "list")).json
+    ok(
+      "list 的 autoinvoke 也不把 \"false\" 报成 true",
+      listFm.skills.find((s) => s.id === "quoted-flag").autoinvoke === false,
+      JSON.stringify(listFm.skills.find((s) => s.id === "quoted-flag")),
+    )
+    const fmMatrix = [
+      ["disable-model-invocation: true", false],
+      ["disable-model-invocation: 'true'", false],
+      ["disable-model-invocation: off", true],
+      ["disable-model-invocation: \"0\"", true],
+      ['metadata:\n  opencode/autoinvoke: "false"', false],
+      ['metadata:\n  opencode/autoinvoke: "true"', true],
+    ]
+    for (const [line, expected] of fmMatrix) {
+      const fm = mod.readFrontmatter(`---\n${line}\n---\n`)
+      ok(
+        `readFrontmatter 布尔归一：${line.replace(/\n/g, " / ")} → autoinvoke ${expected}`,
+        fm.autoinvoke === expected,
+        JSON.stringify(fm),
+      )
+    }
+    const fmDisabled = mod.readFrontmatter('---\ndisable-model-invocation: "false"\n---\n')
+    ok(
+      'readFrontmatter：disable-model-invocation: "false" → disable=false / autoinvoke=true',
+      fmDisabled.disableModelInvocation === false && fmDisabled.autoinvoke === true,
+      JSON.stringify(fmDisabled),
+    )
   }
 
   // dryRun 不得改文件
@@ -930,6 +1061,35 @@ async function call(action, args = {}) {
     cfgsWrite(ORIGINAL)
   }
 
+  // N19 config_unparsable 只认目标文件：sidecar 记录过的**其它**文件坏了，只进 warnings
+  {
+    const extra = path.join(tmpConfigDir, "extra-broken.jsonc")
+    fs.writeFileSync(extra, '{ "permissions": [ { "action": "skill", "resource": "windows-shell" \n')
+    cfgsWrite(ORIGINAL)
+    mod.saveSidecar(tmpConfigDir, {
+      rules: [{ id: "windows-shell", effect: "deny", file: extra, insertedAt: new Date().toISOString() }],
+    })
+    const r = await call("enable", { id: "windows-shell" })
+    ok("N19 无关文件语法错误不阻断 enable（不再报 config_unparsable）", r.json.ok === true && r.json.error === undefined, r.text)
+    ok("N19 无关文件语法错误给出「无需修改」的结论", r.json.changed === false && r.json.reason === "nothing_to_enable", r.text)
+    ok("N19 warnings 点名那个坏文件", r.json.warnings.join("\n").includes("extra-broken.jsonc"), JSON.stringify(r.json.warnings))
+
+    // 调用者确实被 deny（挡路的是 agent 级规则）时也不能因为无关文件而报 config_unparsable
+    mod.saveSidecar(tmpConfigDir, {
+      rules: [{ id: "windows-shell", effect: "deny", file: extra, insertedAt: new Date().toISOString() }],
+    })
+    const r2 = (
+      await callWith({ agentRules: { build: [{ action: "skill", resource: "windows-shell", effect: "deny" }] } }, "enable", {
+        id: "windows-shell",
+      })
+    ).json
+    ok("N19 无关文件语法错误时仍走 no_matching_rule（不是 config_unparsable）", r2.ok === false && r2.error.code === "no_matching_rule", JSON.stringify(r2.error))
+    ok("N19 该分支同样点名坏文件", r2.warnings.join("\n").includes("extra-broken.jsonc"), JSON.stringify(r2.warnings))
+    fs.rmSync(extra, { force: true })
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    cfgsWrite(ORIGINAL)
+  }
+
   // §3.1/§4.4 一致性：sidecar 有记录但配置里已无对应规则 → 必须告警，且该 skill 显示为可用
   {
     cfgsWrite(ORIGINAL)
@@ -973,6 +1133,45 @@ async function call(action, args = {}) {
   ok("标记缺失时给出告警", en2.warnings.some((w) => w.includes("⚠️")), JSON.stringify(en2.warnings))
   mod.strictValidate(fs.readFileSync(CFG).toString("utf8"))
 
+  // N20/N21 sidecar 落盘失败（路径被目录占住）：配置是真相，改动已生效就不能报失败
+  {
+    const sideFile = path.join(tmpConfigDir, "skill_management.state.json")
+    const blockSidecar = () => {
+      fs.rmSync(sideFile, { force: true, recursive: true })
+      fs.mkdirSync(sideFile, { recursive: true })
+    }
+    const unblockSidecar = () => fs.rmSync(sideFile, { force: true, recursive: true })
+
+    cfgsWrite(ORIGINAL)
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    blockSidecar()
+    const base = fs.readFileSync(CFG)
+    const r = await call("disable", { id: "windows-shell" })
+    ok("N20 sidecar 写入失败时 disable 仍报 ok:true + changed:true", r.json.ok === true && r.json.changed === true, r.text)
+    ok("N20 sidecar 写入失败时配置里确实写入了规则", fs.readFileSync(CFG, "utf8").includes('"resource": "windows-shell", "effect": "deny"'), r.text)
+    ok("N20 sidecar 写入失败时仍保留 diff", Array.isArray(r.json.diff) && r.json.diff.length > 0, r.text)
+    ok("N20 sidecar 字段为 null（没有假装写成功）", r.json.sidecar === null, r.text)
+    ok(
+      "N20 warnings 说明 sidecar 记录失败、enable 仍可凭标记定位",
+      /sidecar/.test(r.json.warnings.join("\n")) && /写入失败/.test(r.json.warnings.join("\n")) && /标记注释/.test(r.json.warnings.join("\n")),
+      JSON.stringify(r.json.warnings),
+    )
+    unblockSidecar()
+    const e = await call("enable", { id: "windows-shell" })
+    ok("N20 清理：enable 仍能凭标记删掉规则并逐字节还原", e.json.ok === true && fs.readFileSync(CFG).equals(base), e.text)
+
+    cfgsWrite('{\n  "permissions": [\n    { "action": "skill", "resource": "windows-shell", "effect": "deny" } // skill_management\n  ]\n}\n')
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    blockSidecar()
+    const e2 = await call("enable", { id: "windows-shell" })
+    ok("N21 sidecar 写入失败时 enable 仍报 ok:true + changed:true", e2.json.ok === true && e2.json.changed === true, e2.text)
+    ok("N21 sidecar 写入失败时规则确实已从配置删除", !fs.readFileSync(CFG, "utf8").includes('"resource": "windows-shell"'), fs.readFileSync(CFG, "utf8"))
+    ok("N21 warnings 说明 sidecar 同步失败", /写入失败/.test(e2.json.warnings.join("\n")), JSON.stringify(e2.json.warnings))
+    unblockSidecar()
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    cfgsWrite(ORIGINAL)
+  }
+
   // 声明 output 后：结果必须带 output，且字段满足声明的必需项
   {
     const ctx = makeCtx()
@@ -982,6 +1181,56 @@ async function call(action, args = {}) {
     ok("声明了 output 时结果必须带 output（宿主规则）", "output" in res && res.output && typeof res.output === "object")
     ok("output 满足声明的必需字段", ["schemaVersion", "action", "ok", "warnings"].every((k) => k in res.output), JSON.stringify(Object.keys(res.output)))
     ok("content 是同一份 JSON", JSON.parse(res.content).schemaVersion === res.output.schemaVersion)
+  }
+
+  // 1.1.0 review #4：每个动作的 output 都按 OUTPUT_SCHEMA 逐字段校验（不只看信封）
+  {
+    cfgsWrite(ORIGINAL)
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    const runs = []
+    runs.push(["list", await call("list")])
+    runs.push(["inspect", await call("inspect", { id: "grill-me" })])
+    runs.push(["disable", await call("disable", { id: "windows-shell" })])
+    runs.push(["enable", await call("enable", { id: "windows-shell" })])
+    runs.push(["unknown_action", await call("nope")])
+    runs.push(["skill_not_found", await call("inspect", { id: "no-such-skill" })])
+    runs.push(["missing_param", await call("disable", {})])
+    cfgsWrite('{\n  "permissions": [\n    { "action": "skill", "resource": "windows-shell", "effect": "deny" }\n  ]\n}\n')
+    runs.push(["unverifiable_origin", await call("enable", { id: "windows-shell" })])
+    for (const [label, res] of runs) checkOutput(label, res)
+    ok(
+      "E/schema 补充：写动作的 changed/dryRun/diff 类型正确",
+      runs[2][1].json.changed === true && typeof runs[2][1].json.dryRun === "boolean" && Array.isArray(runs[2][1].json.diff),
+      JSON.stringify({ changed: runs[2][1].json.changed, dryRun: runs[2][1].json.dryRun }),
+    )
+    ok(
+      "E/schema 补充：失败动作的 error.code / error.message 都是非空字符串",
+      runs
+        .filter(([, r]) => r.json.ok === false)
+        .every(([, r]) => typeof r.json.error?.code === "string" && r.json.error.code.length > 0 && typeof r.json.error.message === "string" && r.json.error.message.length > 0),
+      JSON.stringify(runs.filter(([, r]) => r.json.ok === false).map(([l, r]) => `${l}=${JSON.stringify(r.json.error)}`)),
+    )
+
+    // 校验器自身的负向用例：证明它抓得住类型错误，而不是永远返回空
+    const polluted = { schemaVersion: 1, action: "list", ok: true, warnings: [], id: null, changed: "yes" }
+    const problems = schemaProblems(mod.OUTPUT_SCHEMA, polluted)
+    ok(
+      "schema 校验能抓到 null 冒充 string、字符串冒充 boolean",
+      problems.some((p) => p.startsWith("output.id：")) && problems.some((p) => p.startsWith("output.changed：")),
+      problems.join("; "),
+    )
+    ok(
+      "schema 校验能抓到缺必需字段与 error 缺字段",
+      schemaProblems(mod.OUTPUT_SCHEMA, { action: "list", ok: true, warnings: [] }).some((p) => p.startsWith("output.schemaVersion：")) &&
+        schemaProblems(mod.OUTPUT_SCHEMA, { schemaVersion: 1, action: "x", ok: false, warnings: [], error: {} }).some((p) => p.startsWith("output.error.code：")),
+    )
+    ok(
+      "schema 校验能抓到 warnings 里塞非字符串",
+      schemaProblems(mod.OUTPUT_SCHEMA, { schemaVersion: 1, action: "x", ok: true, warnings: [1] }).some((p) => p.startsWith("output.warnings[0]：期望 string，实际 integer")),
+    )
+
+    cfgsWrite(ORIGINAL)
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
   }
 }
 
@@ -1462,7 +1711,7 @@ section("J install.mjs 冲突检测")
   // J18 副本落后时给出提示
   const t18 = mk("lag")
   run(t18, [])
-  fs.writeFileSync(t18.dest, fs.readFileSync(srcFile, "utf8").replace('PLUGIN_VERSION = "1.1.0"', 'PLUGIN_VERSION = "0.9.0"'))
+  fs.writeFileSync(t18.dest, fs.readFileSync(srcFile, "utf8").replace(`PLUGIN_VERSION = "${mod.PLUGIN_VERSION}"`, 'PLUGIN_VERSION = "0.9.0"'))
   const r18 = run(t18, ["--check"])
   ok("J18 副本落后仓库时提示升级", r18.code === 0 && /落后仓库/.test(r18.text), `code=${r18.code} ${r18.text}`)
 

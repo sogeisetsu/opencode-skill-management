@@ -51,7 +51,7 @@ The rest of the design follows from that:
 :::note[Output format]
 Every action returns one JSON object: `schemaVersion`, `action`, `ok`, `warnings`, plus the
 action-specific fields described on these pages. Human-readable strings inside `warnings`,
-`message`, `conclusion.message` and `error.message` are Chinese in 1.1.0; field names and
+`message`, `conclusion.message` and `error.message` are Chinese in 1.2.0; field names and
 literal values are stable.
 :::
 

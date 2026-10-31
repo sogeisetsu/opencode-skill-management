@@ -24,10 +24,10 @@ skill_management({ action: "list" })
 
 | 字段 | 类型 | 含义 |
 |---|---|---|
-| `schemaVersion` | number | 1.1.0 中为 `1`。 |
+| `schemaVersion` | number | 1.2.0 中为 `1`。 |
 | `action` | string | `"list"`。 |
 | `ok` | boolean | 注册表与配置都读到了就是 `true`。 |
-| `warnings` | string[] | 人类可读的提示（1.1.0 为中文）；没有可提示的内容时为空数组。 |
+| `warnings` | string[] | 人类可读的提示（1.2.0 为中文）；没有可提示的内容时为空数组。 |
 
 `list` 另有：
 
@@ -38,7 +38,7 @@ skill_management({ action: "list" })
 | `summary.total` | number | 已注册 skill 数。 |
 | `summary.disabled` | number | 调用者效果为 `deny` 的数量。 |
 | `summary.ask` | number | 调用者效果为 `ask` 的数量（显式规则或宿主回退）。 |
-| `summary.diverged` | number | 在至少一个其它 agent 下效果不同的数量。 |
+| `summary.diverged` | number | 在至少一个其它**可见** agent 下效果不同的数量。`hidden` 的内部 agent（`title`、`summary`……）不计入；它们的明细仍在 `inspect.agents[]` 里。 |
 | `summary.derivedIds` | number | 注册表未给 id、由路径反推的数量。 |
 | `skills[]` | object[] | 每个 skill 一项，按 id 排序。 |
 | `skills[].id` | string \| null | 注册表 id，或由路径反推；两者都没有时为 `null`。 |
@@ -61,7 +61,7 @@ skill_management({ action: "list" })
 | `consistency.unrecordedRules` | object[] | 配置里有、sidecar 不认识的 `skill` 规则：`resource`、`effect`。 |
 | `consistency.missingFromRegistry` | string[] | sidecar 记录、但已不在注册表里的 id。 |
 
-绝不包含 skill 正文。`warnings` 里的消息在 1.1.0 是中文；上面的字段名与取值才是稳定契约。
+绝不包含 skill 正文。`warnings` 里的消息在 1.2.0 是中文；上面的字段名与取值才是稳定契约。
 
 ## 怎么读 `state`
 
@@ -80,7 +80,7 @@ skill_management({ action: "list" })
   "schemaVersion": 1,
   "action": "list",
   "ok": true,
-  "warnings": ["另有 2 个 skill 在其它 agent 下状态不同（逐 agent 明细见 inspect）。"],
+  "warnings": ["另有 2 个 skill 在其它可见 agent 下状态不同（逐 agent 明细见 inspect）。"],
   "callerAgent": { "id": "build", "verified": true },
   "summary": { "total": 29, "disabled": 1, "ask": 0, "diverged": 2, "derivedIds": 0 },
   "skills": [

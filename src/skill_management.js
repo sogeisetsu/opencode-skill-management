@@ -25,7 +25,7 @@ const TOOL_NAME = "skill_management"
 const PLUGIN_ID = "skill_management"
 // 与 package.json 的 version 保持一致（tools/verify.mjs 的 I 段会断言），
 // 供 tools/install.mjs 判断单文件副本是不是旧版。
-export const PLUGIN_VERSION = "1.1.0"
+export const PLUGIN_VERSION = "1.2.0"
 const MARKER = "skill_management" // 归属标记（same-line trailing comment）
 const SIDECAR_BASENAME = "skill_management.state.json"
 const BACKUP_DIRNAME = "skill_management.backups"
@@ -669,6 +669,19 @@ export function saveSidecar(configDir, state) {
   return file
 }
 
+/**
+ * sidecar 只是审计线索，配置才是真源。配置已经写完并通过回读校验时，
+ * sidecar 落盘失败不能把整次调用降级成失败（那会让人以为配置没改）。
+ * 降级为 `sidecar: null` + warning；`enable` 仍能凭同行标记注释定位规则。
+ */
+function saveSidecarBestEffort(configDir, state) {
+  try {
+    return { file: saveSidecar(configDir, state), error: null }
+  } catch (err) {
+    return { file: null, error: err && err.message ? err.message : String(err) }
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // 备份
 // ─────────────────────────────────────────────────────────────
@@ -744,6 +757,29 @@ function parseScalar(raw) {
   return v
 }
 
+/**
+ * 布尔字段归一。`disable-model-invocation: "false"` 是合法 YAML（引号值仍是字符串），
+ * 而 `Boolean("false") === true` —— 直接强转会把「已关闭」报成「启用」。
+ * 同一份 frontmatter 里 `autoinvoke`（注册表 bool）与 `disable-model-invocation`（本工具解析）
+ * 必须得出一致的结论，所以两处都走这里。
+ */
+function asFlag(v) {
+  if (typeof v === "boolean") return v
+  if (typeof v === "number") return v !== 0
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase()
+    if (s === "true" || s === "yes" || s === "on" || s === "1") return true
+    if (s === "false" || s === "no" || s === "off" || s === "0") return false
+  }
+  return undefined
+}
+
+/** 输出用：取不到布尔值就报 null，不猜（与文档里 boolean | null 的语义一致） */
+function flagOrNull(v) {
+  const b = asFlag(v)
+  return b === undefined ? null : b
+}
+
 /** 极简 frontmatter 读取：只取本工具需要的字段，取不到就返回 undefined（不猜） */
 export function readFrontmatter(content) {
   const out = { name: undefined, description: undefined, disableModelInvocation: undefined, autoinvoke: undefined }
@@ -763,7 +799,7 @@ export function readFrontmatter(content) {
     const val = body.slice(idx + 1)
     if (inMetadata && indent <= metadataIndent && key !== "opencode/autoinvoke") inMetadata = key === "metadata"
     if (indent > metadataIndent && inMetadata) {
-      if (key === "opencode/autoinvoke") out.autoinvoke = parseScalar(val)
+      if (key === "opencode/autoinvoke") out.autoinvoke = asFlag(parseScalar(val))
       continue
     }
     if (key === "metadata") {
@@ -775,10 +811,12 @@ export function readFrontmatter(content) {
     }
     if (key === "name") out.name = parseScalar(val)
     else if (key === "description") out.description = parseScalar(val)
-    else if (key === "disable-model-invocation") out.disableModelInvocation = parseScalar(val)
+    else if (key === "disable-model-invocation") out.disableModelInvocation = asFlag(parseScalar(val))
   }
+  // 等价关系（规范 §3.1）：disable-model-invocation: true ⇔ metadata["opencode/autoinvoke"] = false。
+  // 注册表已给 autoinvoke 时以它为准；没给才按 frontmatter 推，且只在能判定时推（不猜）。
   if (out.autoinvoke === undefined && out.disableModelInvocation !== undefined) {
-    out.autoinvoke = out.disableModelInvocation === false ? false : undefined
+    out.autoinvoke = !out.disableModelInvocation
   }
   return out
 }
@@ -992,6 +1030,10 @@ async function actList(ctx) {
   const callerRules = ensureArray(callerAgent?.permissions)
   const callerId = callerAgent?.id ?? null
   const callerVerified = Boolean(ctx.__agentId) && agents.some((a) => a.id === ctx.__agentId)
+  // 差异统计只看**可见** agent：title / summary 这类内部 agent 自带 {*,*,deny}，
+  // 对每个 skill 都「不同」，把它们算进来只会让每次 list 都报「N 个状态不同」的噪音。
+  // inspect.agents[] 仍列全部 agent，明细不丢。
+  const visibleAgents = agents.filter((a) => !a.hidden)
   let disabled = 0
   let ask = 0
   let diverged = 0
@@ -1000,13 +1042,13 @@ async function actList(ctx) {
     const st = s.id ? stateOf(callerRules, s.id) : { effect: "unknown" }
     if (st.effect === "deny") disabled++
     else if (st.effect === "ask") ask++
-    if (s.id && agents.length > 1) {
-      if (agents.some((a) => stateOf(ensureArray(a.permissions), s.id).effect !== st.effect)) diverged++
+    if (s.id && visibleAgents.length > 0) {
+      if (visibleAgents.some((a) => stateOf(ensureArray(a.permissions), s.id).effect !== st.effect)) diverged++
     }
     return {
       id: s.id ?? null,
       name: s.name ?? null,
-      autoinvoke: s.autoinvoke === undefined ? null : Boolean(s.autoinvoke),
+      autoinvoke: flagOrNull(s.autoinvoke),
       source: classifySource(s.path),
       scope: classifyScope(s.path, home),
       state: s.id ? (st.effect === "allow" ? "available" : st.effect === "deny" ? "disabled" : st.effect) : "unknown",
@@ -1022,7 +1064,7 @@ async function actList(ctx) {
       `未能确认调用者 agent（context.agent = ${JSON.stringify(ctx.__agentId ?? null)}），state 按 \`${callerId ?? "(未知)"}\` 计算，可能不代表你的实际权限。`,
     )
   }
-  if (diverged > 0) warnings.push(`另有 ${diverged} 个 skill 在其它 agent 下状态不同（逐 agent 明细见 inspect）。`)
+  if (diverged > 0) warnings.push(`另有 ${diverged} 个 skill 在其它可见 agent 下状态不同（逐 agent 明细见 inspect）。`)
   if (derivedCount > 0) warnings.push(`其中 ${derivedCount} 个 id 由路径反推（注册表项未提供 id；推导规则见 inspect）。`)
 
   const recorded = side.rules.map((r) => r.id)
@@ -1176,10 +1218,10 @@ async function actInspect(ctx, idRaw, nameRaw) {
       source: classifySource(target.path),
       scope: classifyScope(target.path, home),
       description: firstLine(target.description) ?? null,
-      autoinvoke: target.autoinvoke === undefined ? null : Boolean(target.autoinvoke),
+      autoinvoke: flagOrNull(target.autoinvoke),
       frontmatter: {
         name: fm.name ?? null,
-        disableModelInvocation: fm.disableModelInvocation === undefined ? null : Boolean(fm.disableModelInvocation),
+        disableModelInvocation: flagOrNull(fm.disableModelInvocation),
       },
     },
     idDerivation,
@@ -1277,9 +1319,14 @@ async function actDisable(ctx, idRaw, nameRaw, effectRaw, dryRun) {
   const side = loadSidecar(target.configDir)
   side.rules = side.rules.filter((r) => r.id !== id)
   side.rules.push({ id, effect, file: target.file, insertedAt: new Date().toISOString(), createdBlock: Boolean(createdBlock) })
-  const sideFile = saveSidecar(target.configDir, side)
+  const sideSave = saveSidecarBestEffort(target.configDir, side)
 
   const warnings = []
+  if (sideSave.error) {
+    warnings.push(
+      `sidecar \`${sidecarPath(target.configDir)}\` 写入失败（${sideSave.error}）：配置改动已生效，但这次停用没有被记录；enable 仍可凭同行标记注释定位并删除这一条规则。`,
+    )
+  }
   if (verified.actual !== effect) {
     // N3：规则写入是真的（精确规则数增加了），但对调用者不产生该效果 —— 不许把它写成"已生效"。
     warnings.push(
@@ -1298,7 +1345,7 @@ async function actDisable(ctx, idRaw, nameRaw, effectRaw, dryRun) {
     createdBlock,
     diff,
     backup,
-    sidecar: sideFile,
+    sidecar: sideSave.file,
     verification: {
       ok: true,
       via: verified.via,
@@ -1446,6 +1493,8 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
     // "结论只来自实际读到的内容"：解析不了的文档既不定位也不删，但必须说清，否则会读成"没有规则"。
     warnings.push(`无法解析（JSONC 语法错误？）的配置文件：${unparsable.map((f) => `\`${f}\``).join("、")} —— 未从中定位任何规则，请先修好语法。`)
   }
+  // 硬拒绝只对**目标配置文件**成立：sidecar 记录过的其它文件语法坏掉，不该阻断对目标文件的恢复。
+  const targetUnparsable = unparsable.some((f) => path.resolve(f) === path.resolve(target.file))
 
   // 候选项 = 精确命中该 id、且效果为 deny/ask 的规则（allow 不是「挡路的规则」，不删）。
   const candidates = []
@@ -1456,8 +1505,8 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
     }
   }
 
-  if (candidates.length === 0 && unparsable.length > 0) {
-    // 解析不了的配置既不能证明"没有这条规则"，也不能安全删除 —— 明确拒绝，别把"读不到"说成"无需修改"。
+  if (candidates.length === 0 && targetUnparsable) {
+    // 目标配置解析不了既不能证明"没有这条规则"，也不能安全删除 —— 明确拒绝，别把"读不到"说成"无需修改"。
     return failResult("enable", "config_unparsable", "拒绝执行：目标配置无法解析（JSONC 语法错误？），未从中定位任何规则，也未做任何修改。请先修好语法。", {
       ...head,
       changed: false,
@@ -1584,8 +1633,13 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
   }
 
   side.rules = side.rules.filter((r) => r.id !== id)
-  const sideFile = saveSidecar(target.configDir, side)
+  const sideSave = saveSidecarBestEffort(target.configDir, side)
 
+  if (sideSave.error) {
+    warnings.push(
+      `sidecar \`${sidecarPath(target.configDir)}\` 写入失败（${sideSave.error}）：规则已从配置中删除，但 sidecar 里仍留着它的记录；下次 list 会报「sidecar 与配置不一致」，不影响本次结果。`,
+    )
+  }
   if (warn) warnings.push("⚠️ 该规则没有本工具标记（可能被外部写者剥掉过注释），已按 sidecar 记录删除；建议核对一次配置。")
   if (cleanedEmptyBlock) warnings.push("已把因此变空的 permissions 块一并清理。")
   if (verified.postEffect === "deny") {
@@ -1609,7 +1663,7 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
     location,
     rule: { file: hit.file, text: removed },
     backup,
-    sidecar: sideFile,
+    sidecar: sideSave.file,
     verification: { ok: true, via: verified.via, caller: verified.caller, effect: verified.postEffect },
     warnings,
   })
