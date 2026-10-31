@@ -744,6 +744,29 @@ function parseScalar(raw) {
   return v
 }
 
+/**
+ * 布尔字段归一。`disable-model-invocation: "false"` 是合法 YAML（引号值仍是字符串），
+ * 而 `Boolean("false") === true` —— 直接强转会把「已关闭」报成「启用」。
+ * 同一份 frontmatter 里 `autoinvoke`（注册表 bool）与 `disable-model-invocation`（本工具解析）
+ * 必须得出一致的结论，所以两处都走这里。
+ */
+function asFlag(v) {
+  if (typeof v === "boolean") return v
+  if (typeof v === "number") return v !== 0
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase()
+    if (s === "true" || s === "yes" || s === "on" || s === "1") return true
+    if (s === "false" || s === "no" || s === "off" || s === "0") return false
+  }
+  return undefined
+}
+
+/** 输出用：取不到布尔值就报 null，不猜（与文档里 boolean | null 的语义一致） */
+function flagOrNull(v) {
+  const b = asFlag(v)
+  return b === undefined ? null : b
+}
+
 /** 极简 frontmatter 读取：只取本工具需要的字段，取不到就返回 undefined（不猜） */
 export function readFrontmatter(content) {
   const out = { name: undefined, description: undefined, disableModelInvocation: undefined, autoinvoke: undefined }
@@ -763,7 +786,7 @@ export function readFrontmatter(content) {
     const val = body.slice(idx + 1)
     if (inMetadata && indent <= metadataIndent && key !== "opencode/autoinvoke") inMetadata = key === "metadata"
     if (indent > metadataIndent && inMetadata) {
-      if (key === "opencode/autoinvoke") out.autoinvoke = parseScalar(val)
+      if (key === "opencode/autoinvoke") out.autoinvoke = asFlag(parseScalar(val))
       continue
     }
     if (key === "metadata") {
@@ -775,10 +798,12 @@ export function readFrontmatter(content) {
     }
     if (key === "name") out.name = parseScalar(val)
     else if (key === "description") out.description = parseScalar(val)
-    else if (key === "disable-model-invocation") out.disableModelInvocation = parseScalar(val)
+    else if (key === "disable-model-invocation") out.disableModelInvocation = asFlag(parseScalar(val))
   }
+  // 等价关系（规范 §3.1）：disable-model-invocation: true ⇔ metadata["opencode/autoinvoke"] = false。
+  // 注册表已给 autoinvoke 时以它为准；没给才按 frontmatter 推，且只在能判定时推（不猜）。
   if (out.autoinvoke === undefined && out.disableModelInvocation !== undefined) {
-    out.autoinvoke = out.disableModelInvocation === false ? false : undefined
+    out.autoinvoke = !out.disableModelInvocation
   }
   return out
 }
@@ -1010,7 +1035,7 @@ async function actList(ctx) {
     return {
       id: s.id ?? null,
       name: s.name ?? null,
-      autoinvoke: s.autoinvoke === undefined ? null : Boolean(s.autoinvoke),
+      autoinvoke: flagOrNull(s.autoinvoke),
       source: classifySource(s.path),
       scope: classifyScope(s.path, home),
       state: s.id ? (st.effect === "allow" ? "available" : st.effect === "deny" ? "disabled" : st.effect) : "unknown",
@@ -1180,10 +1205,10 @@ async function actInspect(ctx, idRaw, nameRaw) {
       source: classifySource(target.path),
       scope: classifyScope(target.path, home),
       description: firstLine(target.description) ?? null,
-      autoinvoke: target.autoinvoke === undefined ? null : Boolean(target.autoinvoke),
+      autoinvoke: flagOrNull(target.autoinvoke),
       frontmatter: {
         name: fm.name ?? null,
-        disableModelInvocation: fm.disableModelInvocation === undefined ? null : Boolean(fm.disableModelInvocation),
+        disableModelInvocation: flagOrNull(fm.disableModelInvocation),
       },
     },
     idDerivation,

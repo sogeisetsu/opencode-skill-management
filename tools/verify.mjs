@@ -699,6 +699,59 @@ async function call(action, args = {}) {
     ok("inspect 找不到时 ok:false + skill_not_found", missing.ok === false && missing.error.code === "skill_not_found", JSON.stringify(missing))
   }
 
+  // 1.1.0 review #2：frontmatter 的布尔值不得被 Boolean() 强转（"false" 是字符串，Boolean("false") === true）
+  {
+    const quotedFalse = "---\nname: quoted-flag\ndescription: d\ndisable-model-invocation: \"false\"\n---\nbody\n"
+    const fmSkills = [
+      {
+        id: "quoted-flag",
+        name: "quoted-flag",
+        autoinvoke: false,
+        path: path.join(tmpConfigDir, "skills", "quoted-flag", "SKILL.md"),
+        content: quotedFalse,
+      },
+    ]
+    const inspFm = (await callWith({ skills: fmSkills }, "inspect", { id: "quoted-flag" })).json
+    ok(
+      "带引号的 disable-model-invocation: \"false\" 不得报成 true",
+      inspFm.skill.frontmatter.disableModelInvocation === false,
+      JSON.stringify(inspFm.skill.frontmatter),
+    )
+    ok(
+      "同一份 frontmatter：autoinvoke 与 disableModelInvocation 结论一致",
+      inspFm.skill.autoinvoke === false,
+      JSON.stringify({ autoinvoke: inspFm.skill.autoinvoke, fm: inspFm.skill.frontmatter }),
+    )
+    const listFm = (await callWith({ skills: fmSkills }, "list")).json
+    ok(
+      "list 的 autoinvoke 也不把 \"false\" 报成 true",
+      listFm.skills.find((s) => s.id === "quoted-flag").autoinvoke === false,
+      JSON.stringify(listFm.skills.find((s) => s.id === "quoted-flag")),
+    )
+    const fmMatrix = [
+      ["disable-model-invocation: true", false],
+      ["disable-model-invocation: 'true'", false],
+      ["disable-model-invocation: off", true],
+      ["disable-model-invocation: \"0\"", true],
+      ['metadata:\n  opencode/autoinvoke: "false"', false],
+      ['metadata:\n  opencode/autoinvoke: "true"', true],
+    ]
+    for (const [line, expected] of fmMatrix) {
+      const fm = mod.readFrontmatter(`---\n${line}\n---\n`)
+      ok(
+        `readFrontmatter 布尔归一：${line.replace(/\n/g, " / ")} → autoinvoke ${expected}`,
+        fm.autoinvoke === expected,
+        JSON.stringify(fm),
+      )
+    }
+    const fmDisabled = mod.readFrontmatter('---\ndisable-model-invocation: "false"\n---\n')
+    ok(
+      'readFrontmatter：disable-model-invocation: "false" → disable=false / autoinvoke=true',
+      fmDisabled.disableModelInvocation === false && fmDisabled.autoinvoke === true,
+      JSON.stringify(fmDisabled),
+    )
+  }
+
   // dryRun 不得改文件
   const before = fs.readFileSync(CFG)
   const dry = (await call("disable", { id: "grill-me", dryRun: true })).json
