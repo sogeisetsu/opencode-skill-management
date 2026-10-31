@@ -638,9 +638,24 @@ async function call(action, args = {}) {
     ok("别的 agent 全 deny 不影响调用者：统计仍是 0 disabled", t.summary.disabled === 0, JSON.stringify(t.summary))
     ok("别的 agent 全 deny 时 state 仍全是 available", t.skills.every((s) => s.state === "available"), JSON.stringify(t.skills.map((s) => s.state)))
     ok(
-      "提示其它 agent 下的差异",
-      t.summary.diverged === 5 && t.warnings.some((w) => w.includes("另有 5 个 skill 在其它 agent 下状态不同")),
-      JSON.stringify(t.summary),
+      "隐藏 agent（title）的 {*,*,deny} 不计入 diverged（1.1.0 之前 33/33 全报）",
+      t.summary.diverged === 0 && !t.warnings.some((w) => w.includes("状态不同")),
+      JSON.stringify({ summary: t.summary, warnings: t.warnings }),
+    )
+    const inspTitle = (await callWith({ withTitleDeny: true }, "inspect", { id: "grill-me" })).json
+    ok(
+      "隐藏 agent 仍出现在 inspect.agents[]（明细不丢）",
+      inspTitle.agents.some((a) => a.id === "title") && inspTitle.divergentAgents.some((d) => d.id === "title"),
+      JSON.stringify(inspTitle.agents),
+    )
+  }
+  {
+    // 可见 agent 之间规则不同 → 必须计数并告警（修掉隐藏 agent 噪音后不能把真差异也漏掉）
+    const t = (await callWith({ agentRules: { plan: [{ action: "skill", resource: "grill-me", effect: "deny" }] } }, "list")).json
+    ok(
+      "可见 agent 规则不同 → diverged 正确计数且告警出现",
+      t.summary.diverged === 1 && t.warnings.some((w) => w.includes("另有 1 个 skill 在其它可见 agent 下状态不同")),
+      JSON.stringify({ summary: t.summary, warnings: t.warnings }),
     )
   }
   {

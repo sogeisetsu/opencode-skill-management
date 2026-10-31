@@ -992,6 +992,10 @@ async function actList(ctx) {
   const callerRules = ensureArray(callerAgent?.permissions)
   const callerId = callerAgent?.id ?? null
   const callerVerified = Boolean(ctx.__agentId) && agents.some((a) => a.id === ctx.__agentId)
+  // 差异统计只看**可见** agent：title / summary 这类内部 agent 自带 {*,*,deny}，
+  // 对每个 skill 都「不同」，把它们算进来只会让每次 list 都报「N 个状态不同」的噪音。
+  // inspect.agents[] 仍列全部 agent，明细不丢。
+  const visibleAgents = agents.filter((a) => !a.hidden)
   let disabled = 0
   let ask = 0
   let diverged = 0
@@ -1000,8 +1004,8 @@ async function actList(ctx) {
     const st = s.id ? stateOf(callerRules, s.id) : { effect: "unknown" }
     if (st.effect === "deny") disabled++
     else if (st.effect === "ask") ask++
-    if (s.id && agents.length > 1) {
-      if (agents.some((a) => stateOf(ensureArray(a.permissions), s.id).effect !== st.effect)) diverged++
+    if (s.id && visibleAgents.length > 0) {
+      if (visibleAgents.some((a) => stateOf(ensureArray(a.permissions), s.id).effect !== st.effect)) diverged++
     }
     return {
       id: s.id ?? null,
@@ -1022,7 +1026,7 @@ async function actList(ctx) {
       `未能确认调用者 agent（context.agent = ${JSON.stringify(ctx.__agentId ?? null)}），state 按 \`${callerId ?? "(未知)"}\` 计算，可能不代表你的实际权限。`,
     )
   }
-  if (diverged > 0) warnings.push(`另有 ${diverged} 个 skill 在其它 agent 下状态不同（逐 agent 明细见 inspect）。`)
+  if (diverged > 0) warnings.push(`另有 ${diverged} 个 skill 在其它可见 agent 下状态不同（逐 agent 明细见 inspect）。`)
   if (derivedCount > 0) warnings.push(`其中 ${derivedCount} 个 id 由路径反推（注册表项未提供 id；推导规则见 inspect）。`)
 
   const recorded = side.rules.map((r) => r.id)
