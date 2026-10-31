@@ -2,6 +2,25 @@
 
 本文件记录对外可见的变化。版本遵循语义化版本；1.x 内的兼容承诺见 README「兼容性与边界」。
 
+## 未发布
+
+### 变更
+
+- `tools/install.mjs` 改为**先检测再写**：`opencode.json(c)` 的 `plugins` 里已有本包、或同一批被扫描
+  目录里已有第二份副本时，拒绝写入并返回退出码 `2`（一个字节都不动）。原因是宿主对同一 plugin id
+  只加载一份，双来源会报 `Duplicate plugin ID` 并让其中一份显示为加载失败。
+- 安装器新增 `--check` / `--dry-run`（只报告）、`--uninstall`（只删本插件那一个文件）、
+  `--npm`（断言走 npm 渠道、永不写文件）、`--force`（逃生口）、`--json`；未知参数退出 `3`。
+- `<config>` 解析改为与宿主一致：`$OPENCODE_CONFIG_DIR` 优先，其次 `$XDG_CONFIG_HOME/opencode`，
+  再 `~/.config/opencode`。
+- `--check` 会报告副本版本与仓库版本的差距、以及本机 npm 缓存里是否已有更新的版本（纯本地判断，
+  不联网、不写配置）。
+- 插件源码新增 `export const PLUGIN_VERSION`，与 `package.json` 的 `version` 由 `verify.mjs` 断言一致。
+- 验收脚本新增 J 段（19 项）：冲突检测、自排除、`--force` / `--uninstall` / `--json`、坏 JSONC 不误判、
+  项目级声明只警告。总计 279 项。
+- README 与文档站安装页改写：单文件通道不跟 npm 更新，两条通道的升级路径分开写；「不要装两份」
+  一节按实测症状重写（原来写的“后加载覆盖前者”是错的）。
+
 ## 1.1.0 — 2026-10-30
 
 **破坏性变更**：四个动作的输出从 Markdown 改为单个 JSON 对象。动作、入参、写入的规则形状、

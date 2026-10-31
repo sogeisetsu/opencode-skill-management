@@ -23,6 +23,9 @@ import os from "node:os"
 
 const TOOL_NAME = "skill_management"
 const PLUGIN_ID = "skill_management"
+// 与 package.json 的 version 保持一致（tools/verify.mjs 的 I 段会断言），
+// 供 tools/install.mjs 判断单文件副本是不是旧版。
+export const PLUGIN_VERSION = "1.1.0"
 const MARKER = "skill_management" // 归属标记（same-line trailing comment）
 const SIDECAR_BASENAME = "skill_management.state.json"
 const BACKUP_DIRNAME = "skill_management.backups"

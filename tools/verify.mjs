@@ -2,9 +2,9 @@
 /**
  * skill_management 验收脚本（可重复跑）
  *
- *   node tools/verify.mjs            # 全部测试（248 项）
+ *   node tools/verify.mjs            # 全部测试
  *   node tools/verify.mjs --keep     # 不删除临时目录（排查用）
- *   node tools/verify.mjs --section E  # 只跑某一段（A–I，按标题前缀匹配）
+ *   node tools/verify.mjs --section E  # 只跑某一段（A–J，按标题前缀匹配）
  *
  * 覆盖：
  *  A 模块形状 / 纯度（无第三方依赖、无 shell）
@@ -17,6 +17,7 @@
  *  G §11 变更（备份 1 份 + 原子写 + description）
  *  H 性能闸门（29 skills × 12 agents × 10 rules 下 list < 25 ms，软阈值）
  *  I 发布闸门（npm pack 内容 / exports 可解析 / install.mjs 副本逐字节一致）
+ *  J install.mjs 冲突检测（npm 渠道 / 同目录副本 / --force / --uninstall / 版本落后）
  *
  * 本脚本**不触碰**真实全局配置：整个 E 组跑在临时 <config>/opencode 下，
  * install.mjs 那一步也把 XDG_CONFIG_HOME 指到临时目录。
@@ -1276,13 +1277,18 @@ section("I 发布闸门（打包 / exports / 安装副本）")
   // 落点用临时 XDG_CONFIG_HOME，绝不碰真实 <config>。
   const installRoot = path.join(tmpRoot, "installcfg")
   const installed = path.join(installRoot, "opencode", "plugins", "skill_management.js")
+  // 真实环境里 OPENCODE_CONFIG / OPENCODE_CONFIG_DIR 可能指向正在运行的实例（含 npm 渠道），
+  // 那会让安装器判定"已有 npm 渠道"而拒绝写入。这一段测的是单文件通道本身，所以清干净。
+  const installEnv = { ...process.env, XDG_CONFIG_HOME: installRoot }
+  delete installEnv.OPENCODE_CONFIG
+  delete installEnv.OPENCODE_CONFIG_DIR
   let ran = false
   try {
     execFileSync(process.execPath, [path.join(repoRoot, "tools", "install.mjs")], {
       cwd: repoRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, XDG_CONFIG_HOME: installRoot },
+      env: installEnv,
       timeout: 60000,
     })
     ran = true
@@ -1296,11 +1302,174 @@ section("I 发布闸门（打包 / exports / 安装副本）")
       cwd: repoRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, XDG_CONFIG_HOME: installRoot },
+      env: installEnv,
       timeout: 60000,
     })
     ok("N14 重复安装是幂等的（内容相同即跳过）", /已是最新/.test(run2) && fs.readFileSync(installed).equals(fs.readFileSync(srcFile)), run2)
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// J. install.mjs 冲突检测
+// ─────────────────────────────────────────────────────────────
+section("J install.mjs 冲突检测")
+{
+  const { main, decide, resolveConfigDir } = await import(new URL("../tools/install.mjs", import.meta.url))
+  const jRoot = path.join(tmpRoot, "J")
+
+  const mk = (name, opts = {}) => {
+    const base = path.join(jRoot, name)
+    const configRoot = path.join(base, "config")
+    const configDir = path.join(configRoot, "opencode")
+    fs.mkdirSync(path.join(configDir, "plugins"), { recursive: true })
+    const logs = []
+    const ctx = {
+      env: { XDG_CONFIG_HOME: configRoot, ...(opts.env ?? {}) },
+      home: path.join(base, "home"),
+      cwd: opts.cwd ?? base,
+      log: (line) => logs.push(String(line)),
+    }
+    return { base, configRoot, configDir, dest: path.join(configDir, "plugins", "skill_management.js"), ctx, logs }
+  }
+  const run = (t, argv) => {
+    t.logs.length = 0
+    const code = main(argv, t.ctx)
+    return { code, text: t.logs.join("\n") }
+  }
+  const srcBytes = fs.readFileSync(srcFile)
+  const writeJsonc = (file, plugins) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, `{\n  // 测试夹具\n  "plugins": [${plugins.map((p) => JSON.stringify(p)).join(", ")}],\n}\n`)
+  }
+
+  // J1 空配置 → 安装
+  const t1 = mk("empty")
+  const r1 = run(t1, [])
+  ok("J1 空配置 → 写入副本", r1.code === 0 && fs.existsSync(t1.dest) && fs.readFileSync(t1.dest).equals(srcBytes), `code=${r1.code} ${r1.text}`)
+
+  // J2 幂等，且不因自己的目标文件而自撞
+  const r2 = run(t1, [])
+  ok("J2 重复安装幂等，不自撞（目标文件被排除）", r2.code === 0 && /已是最新/.test(r2.text) && fs.readFileSync(t1.dest).equals(srcBytes), `code=${r2.code} ${r2.text}`)
+
+  // J3 --check 不写文件
+  const t3 = mk("check")
+  const r3 = run(t3, ["--check"])
+  ok("J3 --check 零写入", r3.code === 0 && !fs.existsSync(t3.dest) && /\[dry-run\]/.test(r3.text), `code=${r3.code} ${r3.text}`)
+
+  // J4 只有 npm 渠道 → 不写文件
+  const t4 = mk("npm-only")
+  writeJsonc(path.join(t4.configDir, "opencode.jsonc"), ["opencode-skill-management@1.1.0"])
+  const r4 = run(t4, [])
+  ok("J4 已装 npm 渠道 → 不写副本、退出 0", r4.code === 0 && !fs.existsSync(t4.dest) && /npm 渠道已装/.test(r4.text), `code=${r4.code} ${r4.text}`)
+
+  // J5 npm + 副本 → 冲突，一个字节都不动
+  const t5 = mk("conflict")
+  run(t5, [])
+  writeJsonc(path.join(t5.configDir, "opencode.jsonc"), ["opencode-skill-management@1.1.0"])
+  const stamp = fs.statSync(t5.dest).mtimeMs
+  const r5 = run(t5, [])
+  ok("J5 npm + 副本 → 冲突退出 2，不写不改", r5.code === 2 && /检测到冲突/.test(r5.text) && fs.statSync(t5.dest).mtimeMs === stamp, `code=${r5.code}`)
+
+  // J6 --force 逃生口
+  const r6 = run(t5, ["--force"])
+  ok("J6 --force 绕过冲突（退出 0）", r6.code === 0, `code=${r6.code} ${r6.text}`)
+
+  // J7 --npm 断言
+  const t7a = mk("npm-flag")
+  writeJsonc(path.join(t7a.configDir, "opencode.jsonc"), ["opencode-skill-management@1.1.0"])
+  const r7a = run(t7a, ["--npm"])
+  const t7 = mk("npm-missing")
+  const r7b = run(t7, ["--npm"])
+  ok("J7 --npm 有渠道=0 / 无渠道=1", r7a.code === 0 && r7b.code === 1 && /没有找到 npm 渠道/.test(r7b.text), `${r7a.code}/${r7b.code}`)
+
+  // J8 opencode.json（非 jsonc）里的 spec 同样检出
+  const t8 = mk("json")
+  writeJsonc(path.join(t8.configDir, "opencode.json"), ["opencode-skill-management"])
+  const r8 = run(t8, [])
+  ok("J8 opencode.json 里的 spec 同样被检出", r8.code === 0 && !fs.existsSync(t8.dest) && /npm 渠道已装/.test(r8.text), `code=${r8.code}`)
+
+  // J9 坏的 OPENCODE_CONFIG 不误判成"无冲突"，也不拦路
+  const t9 = mk("bad-doc")
+  const bad = path.join(t9.base, "managed.json")
+  fs.writeFileSync(bad, "{ this is not json ]")
+  t9.ctx.env.OPENCODE_CONFIG = bad
+  const r9 = run(t9, [])
+  ok("J9 无法解析的配置文档 → 记警告，不当作无冲突也不拦路", r9.code === 0 && /未验证/.test(r9.text), `code=${r9.code} ${r9.text}`)
+
+  // J10 OPENCODE_CONFIG_DIR 优先（与宿主一致）
+  const t10 = mk("config-dir")
+  const custom = path.join(t10.base, "custom-config")
+  t10.ctx.env.OPENCODE_CONFIG_DIR = custom
+  const r10 = run(t10, [])
+  const customDest = path.join(custom, "plugins", "skill_management.js")
+  ok("J10 OPENCODE_CONFIG_DIR 生效（副本落在该目录）", resolveConfigDir(t10.ctx.env, t10.ctx.home) === path.resolve(custom) && r10.code === 0 && fs.existsSync(customDest), `code=${r10.code} ${customDest}`)
+
+  // J11 项目级声明只提示，不拦全局安装
+  const t11 = mk("project")
+  writeJsonc(path.join(t11.base, "opencode.jsonc"), ["opencode-skill-management"])
+  const r11 = run(t11, [])
+  ok("J11 项目级声明只警告、不阻断", r11.code === 0 && /项目级配置/.test(r11.text) && fs.existsSync(t11.dest), `code=${r11.code}`)
+
+  // J12 同目录另一份副本 → 冲突；内容不像本插件 → 不误报
+  const t12 = mk("sibling")
+  const sibling = path.join(t12.configDir, "plugins", "helper.js")
+  fs.writeFileSync(sibling, 'export default { id: "skill_management", setup() {} }\n')
+  const r12a = run(t12, [])
+  fs.writeFileSync(sibling, 'export default { id: "something_else", setup() {} }\n')
+  const r12b = run(t12, [])
+  ok("J12 同目录另一份副本被检出，别家插件不误报", r12a.code === 2 && /另有一份副本/.test(r12a.text) && r12b.code === 0, `${r12a.code}/${r12b.code}`)
+
+  // J13 --uninstall 只删自己的那一个文件
+  const t13 = mk("uninstall")
+  run(t13, [])
+  fs.writeFileSync(path.join(t13.configDir, "skill_management.state.json"), "{}\n")
+  const r13 = run(t13, ["--uninstall"])
+  ok("J13 --uninstall 只删副本，保留 sidecar", r13.code === 0 && !fs.existsSync(t13.dest) && fs.existsSync(path.join(t13.configDir, "skill_management.state.json")), `code=${r13.code}`)
+
+  // J14 内容不像本插件时拒绝删除
+  const t14 = mk("uninstall-refuse")
+  fs.writeFileSync(t14.dest, "console.log('not us')\n")
+  const r14 = run(t14, ["--uninstall"])
+  ok("J14 --uninstall 拒绝删非本插件文件", r14.code === 1 && fs.existsSync(t14.dest), `code=${r14.code}`)
+
+  // J15 写入失败退出 1
+  const t15 = mk("write-fail")
+  fs.rmSync(path.join(t15.configDir, "plugins"), { recursive: true, force: true })
+  fs.writeFileSync(path.join(t15.configDir, "plugins"), "占位文件，挡住目录创建\n")
+  const r15 = run(t15, [])
+  ok("J15 写入失败退出 1", r15.code === 1 && /写入失败/.test(r15.text), `code=${r15.code} ${r15.text}`)
+
+  // J16 --json 形状
+  const t16 = mk("json-out")
+  run(t16, [])
+  const r16 = run(t16, ["--json"])
+  let shape = null
+  try {
+    shape = JSON.parse(r16.text)
+  } catch {
+    shape = null
+  }
+  ok(
+    "J16 --json 输出稳定形状",
+    shape && shape.schemaVersion === 1 && typeof shape.action === "string" && typeof shape.code === "number" && Array.isArray(shape.warnings),
+    r16.text,
+  )
+
+  // J17 PLUGIN_VERSION 与 package.json 一致
+  const pkgJ = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"))
+  ok("J17 PLUGIN_VERSION === package.json.version", mod.PLUGIN_VERSION === pkgJ.version, `${mod.PLUGIN_VERSION} vs ${pkgJ.version}`)
+
+  // J18 副本落后时给出提示
+  const t18 = mk("lag")
+  run(t18, [])
+  fs.writeFileSync(t18.dest, fs.readFileSync(srcFile, "utf8").replace('PLUGIN_VERSION = "1.1.0"', 'PLUGIN_VERSION = "0.9.0"'))
+  const r18 = run(t18, ["--check"])
+  ok("J18 副本落后仓库时提示升级", r18.code === 0 && /落后仓库/.test(r18.text), `code=${r18.code} ${r18.text}`)
+
+  // J19 decide 是纯函数
+  const d = decide({ npmSpecs: [{ spec: "x" }], dirCopies: [], destExists: true, identical: false, flags: {} })
+  const d2 = decide({ npmSpecs: [{ spec: "x" }], dirCopies: [], destExists: false, identical: false, flags: {} })
+  ok("J19 decide 纯函数：npm+副本=冲突 / npm 独占=0", d.action === "conflict" && d.code === 2 && d2.action === "npm-active" && d2.code === 0, JSON.stringify({ d, d2 }))
 }
 
 console.log(`\n${"─".repeat(60)}`)
