@@ -1,6 +1,6 @@
 ---
 title: 安装
-description: 三条加载通道（git spec、npm、单文件）以及如何确认插件已加载。
+description: 三条加载通道（npm、git spec、单文件）以及如何确认插件已加载。
 ---
 
 插件是一个 JavaScript 文件，没有第三方运行时依赖。任选一条通道，落到磁盘上的都是同一份代码。
@@ -11,21 +11,23 @@ description: 三条加载通道（git spec、npm、单文件）以及如何确�
 - 运行 OpenCode 的环境需要 Node.js **18 或更新版本**。
 - 不需要 token、注册表账号或构建步骤。
 
-## 通道一 —— git spec（推荐）
-
-```pwsh
-opencode plugin add github:sogeisetsu/opencode-skill-management
-```
-
-OpenCode 直接拉取仓库，不经过 npm 注册表，也没有发布环节。
-
-## 通道二 —— npm
+## 通道一 —— npm（推荐）
 
 ```pwsh
 opencode plugin add opencode-skill-management
 ```
 
-npm 包只导出一个入口：`./src/skill_management.js`。运行时依赖：无。
+没有特别理由就用这条：一条命令装包并登记到全局配置，升级交给宿主（`opencode plugin check` /
+`opencode plugin update`）。npm 包只导出一个入口：`./src/skill_management.js`。运行时依赖：无。
+
+## 通道二 —— git spec
+
+```pwsh
+opencode plugin add github:sogeisetsu/opencode-skill-management
+```
+
+OpenCode 直接拉取仓库，不经过 npm 注册表，也没有发布环节；升级同样走宿主的
+`opencode plugin check` / `opencode plugin update`。
 
 ## 通道三 —— 直接复制单文件（不跟 npm 更新）
 
@@ -79,7 +81,7 @@ opencode plugin list --builtin
 `--builtin` 不能省。不带它时，本地目录加载的插件不会出现在列表里，可能显示
 `No plugins found`。
 
-输出里应出现 `skill_management`，source 为 `local`（通道一、二显示包来源）。全新的配置
+输出里应出现 `skill_management`：单文件通道显示 `local`，npm / git spec 显示包来源。全新的配置
 目录里，前两次调用可能为空，再跑一次即可。
 
 然后让模型调用工具，或自己调用：

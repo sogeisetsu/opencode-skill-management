@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Three ways to load the plugin (git spec, npm, single file) and how to verify it loaded.
+description: Three ways to load the plugin (npm, git spec, single file) and how to verify it loaded.
 ---
 
 The plugin is one JavaScript file with no third-party runtime dependencies. Pick whichever
@@ -13,24 +13,27 @@ channel fits your setup; all three result in the same code.
 - Node.js **18 or newer** in the environment that runs OpenCode.
 - No token, registry account or build step is needed.
 
-## Channel 1 — git spec (recommended)
-
-```pwsh
-opencode plugin add github:sogeisetsu/opencode-skill-management
-```
-
-OpenCode fetches the repository directly. No npm registry and no publish step are involved.
-
-## Channel 2 — npm
+## Channel 1 — npm (recommended)
 
 ```pwsh
 opencode plugin add opencode-skill-management
 ```
 
-The npm package exports exactly one entry point: `./src/skill_management.js`. Runtime
-dependencies: none.
+This is the channel to pick unless you have a reason not to: one command installs the package and
+registers it in the global config, and the host handles upgrades (`opencode plugin check` /
+`opencode plugin update`). The package exports exactly one entry point:
+`./src/skill_management.js`. Runtime dependencies: none.
 
-## Channel 3 — copy the single file (no npm updates)
+## Channel 2 — git spec
+
+```pwsh
+opencode plugin add github:sogeisetsu/opencode-skill-management
+```
+
+OpenCode fetches the repository directly. No npm registry and no publish step are involved; the
+same host commands handle upgrades.
+
+## Channel 3 — copy the single file (no updates)
 
 Use this when neither network channel fits (offline machine, vendored setup):
 
@@ -87,8 +90,8 @@ opencode plugin list --builtin
 `--builtin` matters. Without it, plugins loaded from the local directory are not listed and you
 may see `No plugins found`.
 
-The output should contain a `skill_management` entry with source `local` (or the package source
-for channels 1 and 2). In a brand-new config directory, the first one or two calls can be
+The output should contain a `skill_management` entry: source `local` for the single-file
+channel, or the package source for npm / git spec. In a brand-new config directory, the first one or two calls can be
 empty; run it again.
 
 Then ask the model to call the tool, or call it yourself:

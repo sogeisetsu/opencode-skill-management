@@ -39,13 +39,18 @@ node tools/install.mjs                                                 # 离线�
 - 写配置是最小文本编辑（保留注释、缩进、键顺序、CRLF/LF 与 BOM）+ 原子写；写完 `reload` 并轮询回读校验，不符则回滚。
 - 每个动作返回**一个 JSON 对象**，不是 Markdown；工具声明了 `output` schema，宿主会校验结果。
 
+## 兼容
+
+- **1.x 兼容承诺**：四个动作的入参与 JSON 输出信封/字段、写入的规则形状、行尾 marker、单文件结构，在 1.x 内不破坏。
+- **1.1.0 的偏差（已接受）**：1.0.0 → 1.1.0 把输出从 Markdown 换成 JSON，是破坏性变更却落在 minor。1.1.0 已发布、不回收；影响是解析正文的调用方要改读 JSON（`ok` / `error.code`），迁移见 [Compatibility](https://sogeisetsu.github.io/opencode-skill-management/compatibility/)。除此之外 1.x 没有破坏性变更。
+
 ## 链接
 
 - 文档站（英 / 中）：<https://sogeisetsu.github.io/opencode-skill-management/>
 - 兼容性、1.x 承诺与升级说明：[Compatibility](https://sogeisetsu.github.io/opencode-skill-management/compatibility/)
 - 设计规范：[.openchamber/plans/skill-management-spec.md](https://github.com/sogeisetsu/opencode-skill-management/blob/main/.openchamber/plans/skill-management-spec.md)
 - 宿主实测与踩过的坑：[docs/preflight.md](https://github.com/sogeisetsu/opencode-skill-management/blob/main/docs/preflight.md)
-- 验收证据与开发流程：[docs/acceptance.md](https://github.com/sogeisetsu/opencode-skill-management/blob/main/docs/acceptance.md) · [开发与验收](https://sogeisetsu.github.io/opencode-skill-management/development/)
+- 验收证据与开发流程：[docs/acceptance.md](https://github.com/sogeisetsu/opencode-skill-management/blob/main/docs/acceptance.md) · [开发与验收（326 项断言 A–J）](https://sogeisetsu.github.io/opencode-skill-management/development/)
 - 版本变更：[CHANGELOG.md](./CHANGELOG.md)
 
 MIT © 2026 sogeisetsu
