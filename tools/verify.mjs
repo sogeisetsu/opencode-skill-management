@@ -998,6 +998,35 @@ async function call(action, args = {}) {
     cfgsWrite(ORIGINAL)
   }
 
+  // N19 config_unparsable 只认目标文件：sidecar 记录过的**其它**文件坏了，只进 warnings
+  {
+    const extra = path.join(tmpConfigDir, "extra-broken.jsonc")
+    fs.writeFileSync(extra, '{ "permissions": [ { "action": "skill", "resource": "windows-shell" \n')
+    cfgsWrite(ORIGINAL)
+    mod.saveSidecar(tmpConfigDir, {
+      rules: [{ id: "windows-shell", effect: "deny", file: extra, insertedAt: new Date().toISOString() }],
+    })
+    const r = await call("enable", { id: "windows-shell" })
+    ok("N19 无关文件语法错误不阻断 enable（不再报 config_unparsable）", r.json.ok === true && r.json.error === undefined, r.text)
+    ok("N19 无关文件语法错误给出「无需修改」的结论", r.json.changed === false && r.json.reason === "nothing_to_enable", r.text)
+    ok("N19 warnings 点名那个坏文件", r.json.warnings.join("\n").includes("extra-broken.jsonc"), JSON.stringify(r.json.warnings))
+
+    // 调用者确实被 deny（挡路的是 agent 级规则）时也不能因为无关文件而报 config_unparsable
+    mod.saveSidecar(tmpConfigDir, {
+      rules: [{ id: "windows-shell", effect: "deny", file: extra, insertedAt: new Date().toISOString() }],
+    })
+    const r2 = (
+      await callWith({ agentRules: { build: [{ action: "skill", resource: "windows-shell", effect: "deny" }] } }, "enable", {
+        id: "windows-shell",
+      })
+    ).json
+    ok("N19 无关文件语法错误时仍走 no_matching_rule（不是 config_unparsable）", r2.ok === false && r2.error.code === "no_matching_rule", JSON.stringify(r2.error))
+    ok("N19 该分支同样点名坏文件", r2.warnings.join("\n").includes("extra-broken.jsonc"), JSON.stringify(r2.warnings))
+    fs.rmSync(extra, { force: true })
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    cfgsWrite(ORIGINAL)
+  }
+
   // §3.1/§4.4 一致性：sidecar 有记录但配置里已无对应规则 → 必须告警，且该 skill 显示为可用
   {
     cfgsWrite(ORIGINAL)

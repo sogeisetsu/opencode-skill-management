@@ -1493,6 +1493,8 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
     // "结论只来自实际读到的内容"：解析不了的文档既不定位也不删，但必须说清，否则会读成"没有规则"。
     warnings.push(`无法解析（JSONC 语法错误？）的配置文件：${unparsable.map((f) => `\`${f}\``).join("、")} —— 未从中定位任何规则，请先修好语法。`)
   }
+  // 硬拒绝只对**目标配置文件**成立：sidecar 记录过的其它文件语法坏掉，不该阻断对目标文件的恢复。
+  const targetUnparsable = unparsable.some((f) => path.resolve(f) === path.resolve(target.file))
 
   // 候选项 = 精确命中该 id、且效果为 deny/ask 的规则（allow 不是「挡路的规则」，不删）。
   const candidates = []
@@ -1503,8 +1505,8 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
     }
   }
 
-  if (candidates.length === 0 && unparsable.length > 0) {
-    // 解析不了的配置既不能证明"没有这条规则"，也不能安全删除 —— 明确拒绝，别把"读不到"说成"无需修改"。
+  if (candidates.length === 0 && targetUnparsable) {
+    // 目标配置解析不了既不能证明"没有这条规则"，也不能安全删除 —— 明确拒绝，别把"读不到"说成"无需修改"。
     return failResult("enable", "config_unparsable", "拒绝执行：目标配置无法解析（JSONC 语法错误？），未从中定位任何规则，也未做任何修改。请先修好语法。", {
       ...head,
       changed: false,
