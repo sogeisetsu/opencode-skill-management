@@ -2,12 +2,6 @@
 
 给 OpenCode 的 skill 装一个开关：**列出、诊断、停用、恢复** —— 全部通过全局权限规则实现，不删除、不移动、不改写任何 skill 文件。
 
-> 适配 OpenCode V2（2.0.32 上完成 Windows + Linux 双平台验收；1.2.0 在 2.2.0 上做新进程真机复核）。单文件、纯 Node 内置模块、无第三方依赖、不调用 shell。
->
-> **1.x 兼容承诺**：四个动作（`list` / `inspect` / `disable` / `enable`）的入参、JSON 输出信封（`schemaVersion` / `action` / `ok` / `warnings`）与各动作字段、写入的规则形状 `{ "action": "skill", "resource": <id>, "effect": "deny"|"ask" }`、规则行的同行 marker 注释、单文件结构 —— 1.x 内不破坏（`enable` 的归属判定依赖 marker 格式）。
->
-> **1.1.0 的 SemVer 偏差（已接受）**：1.0.0 → 1.1.0 把 Markdown 输出换成了 JSON，这是破坏性变更却落在 minor。1.1.0 已发布，不回收；影响是任何解析正文的调用方要改读 JSON 字段（成败看 `ok`，原因看 `error.code`），动作、入参、规则形状与 marker 都没变。迁移说明见[兼容性与 1.x 承诺](https://sogeisetsu.github.io/opencode-skill-management/compatibility/)。除此之外 1.x 没有破坏性变更。
-
 ## 它解决什么问题
 
 - skill 装多了，模型每轮都要看一大串用不上的描述，想把一部分先关掉。
@@ -48,6 +42,7 @@ node tools/install.mjs                                                 # 离线�
 ## 链接
 
 - 文档站（英 / 中）：<https://sogeisetsu.github.io/opencode-skill-management/>
+- 兼容性、1.x 承诺与升级说明：[Compatibility](https://sogeisetsu.github.io/opencode-skill-management/compatibility/)
 - 设计规范：[.openchamber/plans/skill-management-spec.md](https://github.com/sogeisetsu/opencode-skill-management/blob/main/.openchamber/plans/skill-management-spec.md)
 - 宿主实测与踩过的坑：[docs/preflight.md](https://github.com/sogeisetsu/opencode-skill-management/blob/main/docs/preflight.md)
 - 验收证据与开发流程：[docs/acceptance.md](https://github.com/sogeisetsu/opencode-skill-management/blob/main/docs/acceptance.md) · [开发与验收](https://sogeisetsu.github.io/opencode-skill-management/development/)
