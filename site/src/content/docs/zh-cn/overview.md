@@ -45,7 +45,7 @@ OpenCode 把 skill 权限当作规则列表求值，后匹配者胜，支持 glo
 
 :::note[输出格式]
 每个动作返回一个 JSON 对象：`schemaVersion`、`action`、`ok`、`warnings`，加上本系列页面写明
-的动作字段。1.2.0 中 `warnings`、`message`、`conclusion.message`、`error.message` 里的人类
+的动作字段。1.2.x 中 `warnings`、`message`、`conclusion.message`、`error.message` 里的人类
 可读文字是中文；字段名与字面量是稳定契约。
 :::
 

@@ -24,10 +24,10 @@ One JSON object. Every action starts with the same envelope:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `schemaVersion` | number | `1` in 1.2.0. |
+| `schemaVersion` | number | `1` in 1.2.x. |
 | `action` | string | `"list"`. |
 | `ok` | boolean | `true` when the registry and config were read. |
-| `warnings` | string[] | Human-readable notes (Chinese in 1.2.0); empty when there is nothing to report. |
+| `warnings` | string[] | Human-readable notes (Chinese in 1.2.x); empty when there is nothing to report. |
 
 `list` adds:
 
@@ -61,7 +61,7 @@ One JSON object. Every action starts with the same envelope:
 | `consistency.unrecordedRules` | object[] | Config `skill` rules the sidecar does not know: `resource`, `effect`. |
 | `consistency.missingFromRegistry` | string[] | Recorded ids that are no longer registered. |
 
-Skill bodies are never included. Messages inside `warnings` are Chinese in 1.2.0; field names and
+Skill bodies are never included. Messages inside `warnings` are Chinese in 1.2.x; field names and
 values above are the stable part.
 
 ## Reading `state`

@@ -24,10 +24,10 @@ skill_management({ action: "list" })
 
 | 字段 | 类型 | 含义 |
 |---|---|---|
-| `schemaVersion` | number | 1.2.0 中为 `1`。 |
+| `schemaVersion` | number | 1.2.x 中为 `1`。 |
 | `action` | string | `"list"`。 |
 | `ok` | boolean | 注册表与配置都读到了就是 `true`。 |
-| `warnings` | string[] | 人类可读的提示（1.2.0 为中文）；没有可提示的内容时为空数组。 |
+| `warnings` | string[] | 人类可读的提示（1.2.x 为中文）；没有可提示的内容时为空数组。 |
 
 `list` 另有：
 
@@ -61,7 +61,7 @@ skill_management({ action: "list" })
 | `consistency.unrecordedRules` | object[] | 配置里有、sidecar 不认识的 `skill` 规则：`resource`、`effect`。 |
 | `consistency.missingFromRegistry` | string[] | sidecar 记录、但已不在注册表里的 id。 |
 
-绝不包含 skill 正文。`warnings` 里的消息在 1.2.0 是中文；上面的字段名与取值才是稳定契约。
+绝不包含 skill 正文。`warnings` 里的消息在 1.2.x 是中文；上面的字段名与取值才是稳定契约。
 
 ## 怎么读 `state`
 

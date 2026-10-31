@@ -7,7 +7,7 @@ description: 宿主与运行时支持范围、1.x 内不破坏什么，以及明
 
 | 面 | 状态 |
 |---|---|
-| OpenCode V2 | 支持。1.1.0 在宿主 **2.0.32** 上完成验收（Windows + Linux）；1.2.0 在宿主 **2.2.0** 上用新进程复核（Windows）。 |
+| OpenCode V2 | 支持。1.1.0 在宿主 **2.0.32** 上完成验收（Windows + Linux）；1.2.x 在宿主 **2.2.0** 上用新进程复核（Windows），包含并发写操作。 |
 | OpenCode V1 | 不针对，未测试。 |
 | Windows | 已验证，包含新进程端到端。 |
 | Linux | 已验证，包含新进程端到端。 |
@@ -49,7 +49,7 @@ description: 宿主与运行时支持范围、1.x 内不破坏什么，以及明
 
 ## 这一版是怎么验的
 
-- `node tools/verify.mjs`：A–J 共 **326 项断言**，全部跑在临时配置目录（不碰真实用户配置）。
+- `node tools/verify.mjs`：A–J 共 **333 项断言**，全部跑在临时配置目录（不碰真实用户配置）。
   E 段把每个结果都解析出来，并按声明的 `output` 契约校验。
 - 同一套断言在 CI 的 `ubuntu-latest` 与 `windows-latest` 上运行。
 - 端到端在**新进程**里跑，因为插件在宿主启动时加载。
@@ -70,6 +70,6 @@ description: 宿主与运行时支持范围、1.x 内不破坏什么，以及明
 
 ## 版本
 
-当前版本 **1.2.0**。npm 包名 `opencode-skill-management`，仓库
+当前版本 **1.2.1**。npm 包名 `opencode-skill-management`，仓库
 [sogeisetsu/opencode-skill-management](https://github.com/sogeisetsu/opencode-skill-management)。
 MIT 许可。

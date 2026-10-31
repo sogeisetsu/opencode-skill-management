@@ -7,7 +7,7 @@ description: Host and runtime support, what 1.x promises not to break, and what 
 
 | Surface | Status |
 |---|---|
-| OpenCode V2 | Supported. 1.1.0 was accepted on host **2.0.32** (Windows and Linux); 1.2.0 was re-checked on host **2.2.0** (Windows) in a new process. |
+| OpenCode V2 | Supported. 1.1.0 was accepted on host **2.0.32** (Windows and Linux); 1.2.x was re-checked on host **2.2.0** (Windows) in a new process, including concurrent write actions. |
 | OpenCode V1 | Not targeted; not tested. |
 | Windows | Verified, including new-process end-to-end runs. |
 | Linux | Verified, including new-process end-to-end runs. |
@@ -55,7 +55,7 @@ the envelope, the field names, and the literal values (ids, effects, rule JSON, 
 
 ## How this release was verified
 
-- `node tools/verify.mjs`: **326 assertions** in sections A–J, run entirely against a temporary
+- `node tools/verify.mjs`: **333 assertions** in sections A–J, run entirely against a temporary
   config directory (no real user config touched). Section E parses every result and validates it
   against the declared `output` contract.
 - The same harness runs on `ubuntu-latest` and `windows-latest` in CI.
@@ -81,6 +81,6 @@ Starlight and deployed to GitHub Pages.
 
 ## Version
 
-The current release is **1.2.0**. The npm package is `opencode-skill-management`; the
+The current release is **1.2.1**. The npm package is `opencode-skill-management`; the
 repository is [sogeisetsu/opencode-skill-management](https://github.com/sogeisetsu/opencode-skill-management).
 Licensed MIT.
