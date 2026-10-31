@@ -4,6 +4,21 @@
 
 ## 未发布
 
+### 修复
+
+- `list` 的 `summary.diverged` 与「另有 N 个 skill 状态不同」提示只统计**可见** agent。
+  内部 agent（`title` / `summary`）自带 `{*,*,deny}`，此前让真机每次 `list` 都报「N 个状态不同」
+  的噪音；`inspect.agents[]` 仍列全部 agent，明细不丢。
+- frontmatter 的布尔值不再被 `Boolean()` 强转：`disable-model-invocation: "false"` 是字符串，
+  `Boolean("false") === true`，导致同一份 frontmatter 在 `list` 的 `autoinvoke` 与 `inspect` 的
+  `frontmatter.disableModelInvocation` 上结论相反。现在按 `true/yes/on/1` 与 `false/no/off/0`
+  （含引号形态）归一，两处输出共用同一套判断。
+- `disable` / `enable` 的 sidecar 落盘失败不再把整次调用降级成 `internal_error`：配置已经写入
+  并通过回读校验，返回 `ok: true` + `changed: true`，保留 `diff`，`sidecar` 为 `null`，
+  `warnings` 说明原因（`disable` 仍可靠同行标记注释被 `enable` 定位）。配置不回滚。
+- `enable` 的 `config_unparsable` 硬拒绝只在**目标配置文件**无法解析时触发。sidecar 记录过的
+  其它配置文件语法坏掉，只进 `warnings` 并点名文件，不再阻断对目标文件的恢复。
+
 ### 变更
 
 - `tools/install.mjs` 改为**先检测再写**：`opencode.json(c)` 的 `plugins` 里已有本包、或同一批被扫描
@@ -17,7 +32,12 @@
   不联网、不写配置）。
 - 插件源码新增 `export const PLUGIN_VERSION`，与 `package.json` 的 `version` 由 `verify.mjs` 断言一致。
 - 验收脚本新增 J 段（19 项）：冲突检测、自排除、`--force` / `--uninstall` / `--json`、坏 JSONC 不误判、
-  项目级声明只警告。总计 279 项。
+  项目级声明只警告；并新增按 `OUTPUT_SCHEMA` 对每个动作 `output` 的逐字段校验（含 `error.code` /
+  `error.message`）与 `content` / `output` 同一性断言。总计 326 项。
+- README 精简到 56 行：字段表、动作细节、安装 flags、npm 包内容、用法与验收分别落到文档站的
+  `actions/*`、`installation`、`overview`、`development`。
+- 文档站新增 `design-decisions`（设计取舍）与 `development`（开发与验收）两页；`permissions` 的
+  Effects 一节扩写成 `deny` vs `ask` 的对比表加三个真实用途例子。
 - README 与文档站安装页改写：单文件通道不跟 npm 更新，两条通道的升级路径分开写；「不要装两份」
   一节按实测症状重写（原来写的“后加载覆盖前者”是错的）。
 
@@ -25,6 +45,10 @@
 
 **破坏性变更**：四个动作的输出从 Markdown 改为单个 JSON 对象。动作、入参、写入的规则形状、
 行尾标记与单文件结构都没变；这是 1.1.0 唯一的破坏性变更。
+
+> **SemVer 偏差（已接受）**：破坏性变更落在 minor 上，严格说不符合 SemVer。1.1.0 已经发布，
+> 不回收、不改版本号；影响与迁移方式是「升级后把解析正文的调用方改成读 JSON 字段」（成败看 `ok`，
+> 原因看 `error.code`）。同一说明写在 README 开头与文档站 Compatibility 页。
 
 ### 变更
 
