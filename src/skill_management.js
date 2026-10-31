@@ -669,6 +669,19 @@ export function saveSidecar(configDir, state) {
   return file
 }
 
+/**
+ * sidecar 只是审计线索，配置才是真源。配置已经写完并通过回读校验时，
+ * sidecar 落盘失败不能把整次调用降级成失败（那会让人以为配置没改）。
+ * 降级为 `sidecar: null` + warning；`enable` 仍能凭同行标记注释定位规则。
+ */
+function saveSidecarBestEffort(configDir, state) {
+  try {
+    return { file: saveSidecar(configDir, state), error: null }
+  } catch (err) {
+    return { file: null, error: err && err.message ? err.message : String(err) }
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // 备份
 // ─────────────────────────────────────────────────────────────
@@ -1306,9 +1319,14 @@ async function actDisable(ctx, idRaw, nameRaw, effectRaw, dryRun) {
   const side = loadSidecar(target.configDir)
   side.rules = side.rules.filter((r) => r.id !== id)
   side.rules.push({ id, effect, file: target.file, insertedAt: new Date().toISOString(), createdBlock: Boolean(createdBlock) })
-  const sideFile = saveSidecar(target.configDir, side)
+  const sideSave = saveSidecarBestEffort(target.configDir, side)
 
   const warnings = []
+  if (sideSave.error) {
+    warnings.push(
+      `sidecar \`${sidecarPath(target.configDir)}\` 写入失败（${sideSave.error}）：配置改动已生效，但这次停用没有被记录；enable 仍可凭同行标记注释定位并删除这一条规则。`,
+    )
+  }
   if (verified.actual !== effect) {
     // N3：规则写入是真的（精确规则数增加了），但对调用者不产生该效果 —— 不许把它写成"已生效"。
     warnings.push(
@@ -1327,7 +1345,7 @@ async function actDisable(ctx, idRaw, nameRaw, effectRaw, dryRun) {
     createdBlock,
     diff,
     backup,
-    sidecar: sideFile,
+    sidecar: sideSave.file,
     verification: {
       ok: true,
       via: verified.via,
@@ -1613,8 +1631,13 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
   }
 
   side.rules = side.rules.filter((r) => r.id !== id)
-  const sideFile = saveSidecar(target.configDir, side)
+  const sideSave = saveSidecarBestEffort(target.configDir, side)
 
+  if (sideSave.error) {
+    warnings.push(
+      `sidecar \`${sidecarPath(target.configDir)}\` 写入失败（${sideSave.error}）：规则已从配置中删除，但 sidecar 里仍留着它的记录；下次 list 会报「sidecar 与配置不一致」，不影响本次结果。`,
+    )
+  }
   if (warn) warnings.push("⚠️ 该规则没有本工具标记（可能被外部写者剥掉过注释），已按 sidecar 记录删除；建议核对一次配置。")
   if (cleanedEmptyBlock) warnings.push("已把因此变空的 permissions 块一并清理。")
   if (verified.postEffect === "deny") {
@@ -1638,7 +1661,7 @@ async function actEnable(ctx, idRaw, nameRaw, dryRun) {
     location,
     rule: { file: hit.file, text: removed },
     backup,
-    sidecar: sideFile,
+    sidecar: sideSave.file,
     verification: { ok: true, via: verified.via, caller: verified.caller, effect: verified.postEffect },
     warnings,
   })

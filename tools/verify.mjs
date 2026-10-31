@@ -1041,6 +1041,45 @@ async function call(action, args = {}) {
   ok("标记缺失时给出告警", en2.warnings.some((w) => w.includes("⚠️")), JSON.stringify(en2.warnings))
   mod.strictValidate(fs.readFileSync(CFG).toString("utf8"))
 
+  // N20/N21 sidecar 落盘失败（路径被目录占住）：配置是真相，改动已生效就不能报失败
+  {
+    const sideFile = path.join(tmpConfigDir, "skill_management.state.json")
+    const blockSidecar = () => {
+      fs.rmSync(sideFile, { force: true, recursive: true })
+      fs.mkdirSync(sideFile, { recursive: true })
+    }
+    const unblockSidecar = () => fs.rmSync(sideFile, { force: true, recursive: true })
+
+    cfgsWrite(ORIGINAL)
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    blockSidecar()
+    const base = fs.readFileSync(CFG)
+    const r = await call("disable", { id: "windows-shell" })
+    ok("N20 sidecar 写入失败时 disable 仍报 ok:true + changed:true", r.json.ok === true && r.json.changed === true, r.text)
+    ok("N20 sidecar 写入失败时配置里确实写入了规则", fs.readFileSync(CFG, "utf8").includes('"resource": "windows-shell", "effect": "deny"'), r.text)
+    ok("N20 sidecar 写入失败时仍保留 diff", Array.isArray(r.json.diff) && r.json.diff.length > 0, r.text)
+    ok("N20 sidecar 字段为 null（没有假装写成功）", r.json.sidecar === null, r.text)
+    ok(
+      "N20 warnings 说明 sidecar 记录失败、enable 仍可凭标记定位",
+      /sidecar/.test(r.json.warnings.join("\n")) && /写入失败/.test(r.json.warnings.join("\n")) && /标记注释/.test(r.json.warnings.join("\n")),
+      JSON.stringify(r.json.warnings),
+    )
+    unblockSidecar()
+    const e = await call("enable", { id: "windows-shell" })
+    ok("N20 清理：enable 仍能凭标记删掉规则并逐字节还原", e.json.ok === true && fs.readFileSync(CFG).equals(base), e.text)
+
+    cfgsWrite('{\n  "permissions": [\n    { "action": "skill", "resource": "windows-shell", "effect": "deny" } // skill_management\n  ]\n}\n')
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    blockSidecar()
+    const e2 = await call("enable", { id: "windows-shell" })
+    ok("N21 sidecar 写入失败时 enable 仍报 ok:true + changed:true", e2.json.ok === true && e2.json.changed === true, e2.text)
+    ok("N21 sidecar 写入失败时规则确实已从配置删除", !fs.readFileSync(CFG, "utf8").includes('"resource": "windows-shell"'), fs.readFileSync(CFG, "utf8"))
+    ok("N21 warnings 说明 sidecar 同步失败", /写入失败/.test(e2.json.warnings.join("\n")), JSON.stringify(e2.json.warnings))
+    unblockSidecar()
+    mod.saveSidecar(tmpConfigDir, { rules: [] })
+    cfgsWrite(ORIGINAL)
+  }
+
   // 声明 output 后：结果必须带 output，且字段满足声明的必需项
   {
     const ctx = makeCtx()
