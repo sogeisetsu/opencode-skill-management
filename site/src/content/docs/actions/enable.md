@@ -89,7 +89,7 @@ The usual envelope (`schemaVersion`, `action`, `ok`, `warnings`) plus:
 | `rule` | object | `file` and the exact `text` of the deleted (or deletable) rule. |
 | `diff` | string[] | The removed line, for `dryRun`. |
 | `backup` | string | Backup path for the file that was edited. |
-| `sidecar` | string | Sidecar path written after success. |
+| `sidecar` | string \| null | Sidecar path written after success; `null` when the sidecar could not be written (the deletion still stands and `warnings` explains the stale record). |
 | `verification` | object | `ok`, `via`, `caller`, and `effect` after deletion. |
 
 A successful run also reports whether a now-empty `permissions` block was cleaned up, and if the

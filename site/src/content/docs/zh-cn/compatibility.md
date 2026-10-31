@@ -47,14 +47,16 @@ description: 宿主与运行时支持范围、1.x 内不破坏什么，以及明
   插件无法单方面抹平。
 - **无网络访问。** 插件不向外请求；文档站也没有分析、cookie 或按语言跳转。
 
-## 1.1.0 是怎么验的
+## 这一版是怎么验的
 
-- `node tools/verify.mjs`：A–I 共 260 项断言，全部跑在临时配置目录（不碰真实用户配置）。
-  E 段把每个结果都当 JSON 解析，并按声明的 `output` 契约检查字段。
+- `node tools/verify.mjs`：A–J 共 **326 项断言**，全部跑在临时配置目录（不碰真实用户配置）。
+  E 段把每个结果都解析出来，并按声明的 `output` 契约校验。
 - 同一套断言在 CI 的 `ubuntu-latest` 与 `windows-latest` 上运行。
 - 端到端在**新进程**里跑，因为插件在宿主启动时加载。
 - H 段是性能闸门：29 skills × 12 agents × 10 rules 下 `list` < 25 ms。
 - I 段是发布闸门：打包内容、`exports` 可解析、安装副本逐字节一致。
+
+细节与 Linux/WSL 验收脚本见[开发与验收](../development/)。
 
 这些检查针对插件。文档站用 Astro + Starlight 单独构建，部署到 GitHub Pages。
 

@@ -82,7 +82,7 @@ skill_management({ action: "enable", id: "windows-shell", dryRun: true })
 | `rule` | object | `file` 与被删（或可删）规则的原文 `text`。 |
 | `diff` | string[] | `dryRun` 时将被删除的那一行。 |
 | `backup` | string | 被编辑文件的备份路径。 |
-| `sidecar` | string | 成功后写入的 sidecar 路径。 |
+| `sidecar` | string \| null | 成功后写入的 sidecar 路径；写不进去时为 `null`（删除仍然成立，`warnings` 说明记录已过期）。 |
 | `verification` | object | `ok`、`via`、`caller`，以及删除后的 `effect`。 |
 
 成功时还会说明是否顺手清理了变空的 `permissions` 块；如果调用者仍因更宽的规则而为 `deny`，

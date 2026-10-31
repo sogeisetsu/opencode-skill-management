@@ -38,7 +38,7 @@ export default defineConfig({
       // Pagefind ships no Windows binary for this environment; the site is
       // small enough that the sidebar and full-text pages are the navigation.
       pagefind: false,
-      // Keep the built output to the 10 documentation pages per locale, so the
+      // Keep the built output to the 12 documentation pages per locale, so the
       // English and Chinese route sets are exact mirrors.
       disable404Route: true,
       social: [
@@ -83,6 +83,16 @@ export default defineConfig({
               label: 'Permissions & evaluation',
               translations: { 'zh-CN': '权限规则与求值模型' },
               link: '/permissions/',
+            },
+            {
+              label: 'Design decisions',
+              translations: { 'zh-CN': '设计取舍' },
+              link: '/design-decisions/',
+            },
+            {
+              label: 'Development & verification',
+              translations: { 'zh-CN': '开发与验收' },
+              link: '/development/',
             },
             {
               label: 'Troubleshooting & FAQ',

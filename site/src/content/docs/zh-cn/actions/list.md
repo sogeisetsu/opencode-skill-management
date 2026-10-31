@@ -38,7 +38,7 @@ skill_management({ action: "list" })
 | `summary.total` | number | 已注册 skill 数。 |
 | `summary.disabled` | number | 调用者效果为 `deny` 的数量。 |
 | `summary.ask` | number | 调用者效果为 `ask` 的数量（显式规则或宿主回退）。 |
-| `summary.diverged` | number | 在至少一个其它 agent 下效果不同的数量。 |
+| `summary.diverged` | number | 在至少一个其它**可见** agent 下效果不同的数量。`hidden` 的内部 agent（`title`、`summary`……）不计入；它们的明细仍在 `inspect.agents[]` 里。 |
 | `summary.derivedIds` | number | 注册表未给 id、由路径反推的数量。 |
 | `skills[]` | object[] | 每个 skill 一项，按 id 排序。 |
 | `skills[].id` | string \| null | 注册表 id，或由路径反推；两者都没有时为 `null`。 |
@@ -80,7 +80,7 @@ skill_management({ action: "list" })
   "schemaVersion": 1,
   "action": "list",
   "ok": true,
-  "warnings": ["另有 2 个 skill 在其它 agent 下状态不同（逐 agent 明细见 inspect）。"],
+  "warnings": ["另有 2 个 skill 在其它可见 agent 下状态不同（逐 agent 明细见 inspect）。"],
   "callerAgent": { "id": "build", "verified": true },
   "summary": { "total": 29, "disabled": 1, "ask": 0, "diverged": 2, "derivedIds": 0 },
   "skills": [

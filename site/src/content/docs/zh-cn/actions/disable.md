@@ -72,7 +72,7 @@ skill_management({ action: "disable", id: "windows-shell", effect: "ask" })
 | `createdBlock` | boolean | 是否新建了 `permissions` 块。 |
 | `diff` | string[] | 实际写入（或将要写入）的变动行原文。 |
 | `backup` | string \| null | 目标原本存在时的备份路径。 |
-| `sidecar` | string | 成功后写入的 sidecar 路径。 |
+| `sidecar` | string \| null | 成功后写入的 sidecar 路径；写不进去时为 `null`（配置改动仍然成立，`warnings` 说明原因）。 |
 | `verification` | object | `ok`、`via`、`caller`、`expected`、`actual`、`beforeCount`、`count`、`diverged`。 |
 
 `verification.via` 写明重载/轮询路径，并带精确规则条数的变化（例如 `精确规则数 0→1`）——

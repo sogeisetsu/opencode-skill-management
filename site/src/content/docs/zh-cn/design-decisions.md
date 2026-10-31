@@ -1,0 +1,79 @@
+---
+title: 设计取舍
+description: 为什么写 permission 规则而不是 policy、为什么不提供 allow、为什么按文本最小编辑，以及每个选择的代价。
+---
+
+`skill_management` 是刻意做小的：四个动作、一种规则形状、一个允许写的文件。这一页记录这些
+选择、它们的证据，以及每个选择的**代价**。
+
+## 为什么写 `permissions` 规则，而不是 `policies` 条目
+
+OpenCode 有两种方式阻止一个 skill 被使用：
+
+| 机制 | 去掉了什么 | 粒度 | 本工具能写吗 |
+|---|---|---|---|
+| `permissions` 规则，`effect: "deny"` | 从模型可见列表里消失，加载被拒 | 单个 skill id，**按 agent** | 能 |
+| `policies`（`integration.use` deny） | 把 skill 从注册表里摘掉 | 单个 integration id，全局 | 不能 |
+
+选权限规则，是因为它是唯一能表达本工具必须区分的三种状态的机制：`allow`、`deny`、`ask`。
+`ask` 是宿主原生的 `Permission.Effect`，不是变通：skill 仍在列表里，加载时才询问。规则也按
+每个 agent 自己的规则集求值，所以工具能回答「**对我**可用吗」这种按 agent 的问题，而不是
+一个全局结论。
+
+**代价。** policy 的 deny 更彻底：它把 skill 从注册表摘掉（`s.remove(id)`），对所有 agent 都
+消失，连直接读注册表的工具也看不到。本工具做不到这一点，也读不到 policy 文档 —— 插件上下文
+没有 `config` 域。如果挡住某个 skill 的是 policy，`enable` 只报告然后停下。
+
+想让一个 skill 对所有人都不存在，用 policy；想要一个可见、按 agent 生效、可撤销的开关，用权限规则。
+
+## 为什么不提供 `allow`
+
+`disable` 只追加 `deny` 或 `ask`；`enable` 只删除效果为这两者之一的规则。
+
+追加一条 `allow` 会在该 id 上优先于所有更早的规则，包括别人故意写的更宽的 `deny`。那等于
+工具为了「修好」一个 skill，去覆盖一个它从未参与的决定，影响范围被悄悄放大。它还会破坏归属
+模型：`enable` 靠效果与标记认出自己写的规则，一条自己写的 `allow` 就成了没人回收的规则。
+
+**代价。** 恢复永远是「删除」，不是「覆盖」。如果删完仍被 agent 级规则或通配 `deny` 挡住，
+工具只报告，不动手 —— 那条规则由你改。
+
+## 为什么只写全局配置
+
+写入目标只有一个，按写明的顺序解析（见[权限规则与求值模型](../permissions/#写哪个配置文件)）。
+项目级配置、`agents.<id>.permissions` 与 `policies` 只读或只报告，绝不代改。
+
+只有一个目标，工具才能对自己改了什么保持诚实：`config.file` 点名它，备份取自它，`enable`
+先在它里面找。也意味着不会在你碰巧所在的项目里留下意外改动。
+
+**代价。** 不能只对某个项目停用，也不能只对某个 agent 停用。两者都是真实需求，都不在范围内。
+
+## 为什么按文本最小编辑，并带同行标记
+
+全局配置通常是手工维护的 JSONC：注释、键顺序、缩进、CRLF/LF，有时还有 BOM。解析成对象再
+序列化回去会毁掉这些，所以插件按文本插入或删除那一条，写前再校验结果。
+
+行尾的 `// skill_management` 注释是**文件内**的来源信息。sidecar 丢失或损坏时它还在，
+`enable` 首先找它。它的格式属于 1.x 兼容承诺 —— sidecar 丢失后能删掉规则，靠的就是它。
+
+**代价。** 写出去的标记格式永远不能变。另外，如果别的工具把配置里的注释剥掉了，标记就没了：
+`enable` 会退回 sidecar 记录，或者拒绝而不是猜着删。
+
+## 为什么 sidecar 只是审计线索
+
+`<config>/skill_management.state.json` 记录本工具写过的规则的 id、效果、文件与时间戳。它
+从不被「重放」：与配置不一致时，`list` 报告差异，以配置为准。
+
+**代价。** 标记和 sidecar 记录都丢了，`enable` 就无法证明这条规则是本工具写的，只能把原文
+打印出来。写 sidecar 也是尽力而为：写不进去时配置改动仍算完成，结果里 `sidecar` 为 `null`，
+`warnings` 写明原因。
+
+## 按场景选机制
+
+| 你想要 | 用什么 |
+|---|---|
+| 对所有 agent 都消失，像没装过一样 | `policies`（`integration.use` deny） |
+| 对当前 agent 隐藏，并在加载时拒绝 | `disable`（`permissions` 规则，`effect: "deny"`） |
+| 保留在列表里，每次加载都确认 | `disable` + `effect: "ask"` |
+| 不自动进上下文，但仍能按名字加载 | `SKILL.md` 的 `disable-model-invocation` —— 那是 frontmatter，不是权限；本工具只报告 |
+
+下一步：[开发与验收](../development/)，看这些行为是怎么被测出来的。
