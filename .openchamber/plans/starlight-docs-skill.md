@@ -42,6 +42,7 @@
 - `--default-locale` 在 v1 只支持 `root`，其它值报 `DEFAULT_LOCALE_IGNORED`（warn）。
 - `--site-url` 被接受但 v1 未参与断言（canonical 只查是否存在，不比对域名）。
 - `--baseline` / `--browser-report` 只在 `audit` 生效（计划把它们归在 audit/check 一组）。
+- 外链检查按「谁的问题」分级（2026-11-03 补验后改的）：HTTP 4xx/5xx 才 `warn`；401/403/405/429 报 `info EXTERNAL_LINK_BLOCKED`；超时/DNS/连接失败报 `info EXTERNAL_LINK_UNVERIFIED`；全部失败只出一条 `info EXTERNAL_LINKS_UNAVAILABLE`。否则代理/离线会把整站外链误报成坏链。
 
 验证记录：
 
@@ -51,10 +52,10 @@
 - `emit-check` 产物在**没有 skill 的**临时仓库可用：正常 dist 输出 ok；删页后报 `ROUTE_MIRROR_MISMATCH` / `DEAD_LINK` / `SWITCHER_MISSING`，退出码 1。
 - `--node 20`：`detect` 报 `NODE_UNSUPPORTED`、`check` 报 `node_unsupported`，都退出 1。
 - `node tools/verify.mjs` 333 项全绿；`npm run docs:build` 24 页；`npm run docs:check` 5 项全绿。
+- `--check-links all` 补验（2026-11-03）：主站 23 条外链，直连时 0 findings；临时 dist 实测 404 → `EXTERNAL_LINK_UNREACHABLE`（warn）、403 → `EXTERNAL_LINK_BLOCKED`（info）、`ENOTFOUND` → `EXTERNAL_LINK_UNVERIFIED`（info）、全失败 → 单条 `EXTERNAL_LINKS_UNAVAILABLE`（info）。同机网络曾一次 23/23 超时、数分钟后全部 200，结论是**不能当门禁**。
 
 未验证：
 
-- `--check-links all` 的外部 HEAD 检查（本次未联网实测）。
 - Linux CI 上的导出物行为（纯 Node，风险低，未实测）。
 - 浏览器视觉验收（本机无浏览器工具，未验证）。
 

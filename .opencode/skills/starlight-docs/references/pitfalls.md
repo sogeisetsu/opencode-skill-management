@@ -21,7 +21,12 @@
 - `base: '/repo'` 下，**手写 HTML 里的绝对链接不会自动加前缀**：hero action、footer、MDX 里裸 `<a href="/overview/">` 都要写成 `/<repo>/overview/`。
 - 相对链接按页面路径解析；构建后 `check` 会逐条验证目标文件存在（`DEAD_LINK`）以及没越出 `base`（`BASE_ESCAPE`）。
 - Starlight 总会链接 `/favicon.svg`；`public/favicon.svg` 不存在就是全线死链。scaffold 会生成一个。
-- 外链默认不检查；`--check-links all` 才 HEAD，失败只记 `warn`（可能是站点拒绝 HEAD 或防抓取）。
+- 外链默认不检查；`--check-links all` 才发请求（HEAD，405/403 再降级 GET）。结果分四级：
+  - `EXTERNAL_LINK_UNREACHABLE`（**warn**）：对方返回 4xx/5xx，且不是「拒绝机器人」的状态；
+  - `EXTERNAL_LINK_BLOCKED`（info）：401/403/405/429——对方不让自动请求，不代表链接坏了；
+  - `EXTERNAL_LINK_UNVERIFIED`（info）：超时、DNS、连接失败；
+  - `EXTERNAL_LINKS_UNAVAILABLE`（info）：所有外链都没走到 HTTP，只出一条，不逐条刷屏。
+- 外链检查**依赖运行时的网络路径，不要当门禁**。2026-11-03 同一台机器实测：先一次 23/23 全超时（8s），几分钟后同一批链接全部 200。排查时先看 `curl -I <url>`：本机 `curl` 走系统代理正常，而 Node 22 的全局 `fetch` **不读** `HTTP(S)_PROXY`（设 `NODE_USE_ENV_PROXY=1` 才走，且带 `UNDICI-EHPA` experimental 警告）。因此「全红」通常是代理/分流，不是站点坏了。
 
 ## 主题与文字
 

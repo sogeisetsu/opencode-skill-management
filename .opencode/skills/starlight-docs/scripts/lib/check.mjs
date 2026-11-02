@@ -390,7 +390,8 @@ export function checkDist(options) {
 
 /**
  * External links are only reached with `--check-links all`, never in the
- * deterministic core run.
+ * deterministic core run. Network-level failures (offline, proxy, DNS) are
+ * reported as `info`, not `warn`: they say nothing about the link itself.
  */
 export function collectExternalLinks(dist, limit) {
   const external = /^https?:\/\//i
@@ -411,12 +412,17 @@ export function collectExternalLinks(dist, limit) {
   return found
 }
 
+/** 401/403/405/429 mean "I will not answer a bot", not "the page is gone". */
+const BLOCKED_STATUS = new Set([401, 403, 405, 429])
+
 export async function checkExternalLinks(options) {
   const opts = normalizeOptions(options || {})
   const findings = []
   if (!opts.dist || !fs.existsSync(opts.dist)) return findings
   const links = collectExternalLinks(opts.dist, opts.maxLinks)
-  await Promise.all(
+  if (links.length === 0) return findings
+
+  const outcomes = await Promise.all(
     links.map(async (link) => {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), opts.timeout)
@@ -425,20 +431,62 @@ export async function checkExternalLinks(options) {
         if (response.status === 405 || response.status === 403) {
           response = await fetch(link.url, { method: 'GET', signal: controller.signal, redirect: 'follow' })
         }
-        if (response.status >= 400) {
-          add(findings, 'EXTERNAL_LINK_UNREACHABLE', 'warn', `${link.url} -> HTTP ${response.status}`, {
-            path: link.page,
-          })
-        }
+        return { link, kind: 'http', status: response.status }
       } catch (error) {
-        add(findings, 'EXTERNAL_LINK_UNREACHABLE', 'warn', `${link.url} -> ${error.name || 'error'}`, {
-          path: link.page,
-        })
+        return {
+          link,
+          kind: error.name === 'AbortError' ? 'timeout' : 'network',
+          detail:
+            error.name === 'AbortError'
+              ? 'timeout'
+              : (error.cause && error.cause.code) || error.message || error.name || 'error',
+        }
       } finally {
         clearTimeout(timer)
       }
     }),
   )
+
+  const networkFailures = outcomes.filter((item) => item.kind === 'network' || item.kind === 'timeout')
+  if (networkFailures.length === outcomes.length) {
+    const proxySet = Boolean(process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.https_proxy)
+    const anyTimeout = networkFailures.some((item) => item.kind === 'timeout')
+    const hint =
+      proxySet && anyTimeout
+        ? 'a proxy is configured; Node fetch ignores HTTP(S)_PROXY unless NODE_USE_ENV_PROXY=1 is set at start-up'
+        : 'check DNS/network or raise --timeout'
+    add(
+      findings,
+      'EXTERNAL_LINKS_UNAVAILABLE',
+      'info',
+      `none of the ${outcomes.length} external links could be reached before HTTP (${hint}); external links were not checked`,
+    )
+    return findings
+  }
+
+  for (const outcome of outcomes) {
+    const where = { path: outcome.link.page }
+    if (outcome.kind === 'timeout') {
+      add(findings, 'EXTERNAL_LINK_UNVERIFIED', 'info', `${outcome.link.url} -> timed out after ${opts.timeout}ms`, where)
+      continue
+    }
+    if (outcome.kind === 'network') {
+      add(findings, 'EXTERNAL_LINK_UNVERIFIED', 'info', `${outcome.link.url} -> ${outcome.detail}`, where)
+      continue
+    }
+    if (outcome.status < 400) continue
+    if (BLOCKED_STATUS.has(outcome.status)) {
+      add(
+        findings,
+        'EXTERNAL_LINK_BLOCKED',
+        'info',
+        `${outcome.link.url} -> HTTP ${outcome.status} (the site refuses automated requests; not necessarily broken)`,
+        where,
+      )
+      continue
+    }
+    add(findings, 'EXTERNAL_LINK_UNREACHABLE', 'warn', `${outcome.link.url} -> HTTP ${outcome.status}`, where)
+  }
   return findings
 }
 

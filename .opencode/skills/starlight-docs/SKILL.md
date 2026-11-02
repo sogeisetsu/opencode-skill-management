@@ -74,7 +74,7 @@ node <skill>/scripts/site.mjs --action check --repo <repo> [--profile landing] `
 ```
 
 - 会先装依赖（缺 `node_modules` 时）再构建，然后断言：路由集合、多语言镜像、`<html lang>`、每页一个 `<h1>`、站内死链、`base` 越界、`navigator.language`/`accept-language` 跳转、语言切换器映射到同一 slug、frontmatter description。
-- 默认**不联网**。`--check-links all` 才 HEAD 外部链接（有超时，失败只记 `warn`）。
+- 默认**不联网**。`--check-links all` 才发 HEAD（405/403 再降级 GET）：只有真正的 HTTP 4xx/5xx 报 `warn`；超时/DNS 是 `info EXTERNAL_LINK_UNVERIFIED`，401/403/405/429 是 `info EXTERNAL_LINK_BLOCKED`，全部失败只出一条 `EXTERNAL_LINKS_UNAVAILABLE`。结果依赖运行时网络路径，别当门禁。
 - `--profile landing` 只对 splash 首页生效，**缺 `.sd-*` 类名只报 `info`**：只有 scaffold 生成的那套布局才值得开。
 - `--base`/`--locales` 缺省从 `astro.config` 读；读不到就是 `''` / `root`，会在 `next` 里指出来。
 
