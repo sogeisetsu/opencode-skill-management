@@ -6,27 +6,57 @@
 
 ## Steps
 
-- [ ] 修 `.gitignore`：删第 22 行 `.opencode`，让 skill 能入库（`docs-sync` 两个文件一并提交）
-- [ ] 建分支 `feat/starlight-docs-skill`
-- [ ] 写 `scripts/lib/detect.mjs`：Node / 包管理器 / astro 配置 / starlight 依赖 / git remote 检测
-- [ ] 写 `scripts/lib/check.mjs`：core 六项（路由集合、`base`、死链、`lang`、无语言嗅探、parity）+ `--profile landing`（缺类名只报 `info`），**只依赖 node 内置模块**（供 `emit-check` 内联）
-- [ ] 写 `scripts/lib/scaffold.mjs`：`--dry-run` 文件清单 + `--apply` 落盘（`astro.config.mjs`、`site/package.json`、内容骨架、组件、预设、workflow、`site/.gitignore`）
-- [ ] 写 `scripts/lib/audit.mjs`：框架识别 + 复用 `check` + 非 Starlight 只报告（不写文件）
-- [ ] 写 `scripts/lib/emit-check.mjs`：把 `check.mjs` 渲染成值内联的自包含脚本（不复制判断逻辑）
-- [ ] 写 `scripts/lib/report.mjs`：`schemaVersion: 1` 的 JSON / Markdown 输出 + `next` 映射 + `--fail-on` 退出码
-- [ ] 写 `scripts/site.mjs`：参数解析、action 分发（detect / scaffold / check / audit / emit-check）、`unknown_action` 报错
-- [ ] 写 `assets/custom.css`：裁剪版 `sd-*` 预设（≤200 行，含 §10 的修法）
-- [ ] 写 `assets/menu.css`：ThemeSelect/LanguageSelect 的控件样式（不覆盖 Starlight 配色）
-- [ ] 写 `assets/components/ThemeSelect.astro`（总是生成）与 `LanguageSelect.astro`（仅多语言）
-- [ ] 写 `assets/pages.yml`：`npm ci --prefix site` + build + `upload-pages-artifact`（`site/dist`）
-- [ ] 写 `SKILL.md`（≤150 行）：触发、决策树、唯一入口、`next` 处理、硬边界
-- [ ] 写 `references/{new-site,audit,i18n,pitfalls}.md`
-- [ ] `skill_validate` + `skill_parse` 通过
-- [ ] 临时仓库 smoke：`scaffold --apply` → `npm install` → `check` core 全绿（Node 22.12+）
-- [ ] `emit-check` 产物在**没有 skill** 的临时仓库跑通，结论与 skill 内 `check` 一致
-- [ ] `--profile landing` 在缺 `.sd-*` 类时只报 `info`，不报 `error`
-- [ ] 删临时仓库；`node tools/verify.mjs` 仍全绿（本仓库无回归）
-- [ ] 小步提交，合并 `main`，push
+- [x] 修 `.gitignore`：删第 22 行 `.opencode`，让 skill 能入库（`docs-sync` 两个文件一并提交）
+- [x] 建分支 `feat/starlight-docs-skill`
+- [x] 写 `scripts/lib/detect.mjs`：Node / 包管理器 / astro 配置 / starlight 依赖 / git remote 检测
+- [x] 写 `scripts/lib/check.mjs`：core 六项（路由集合、`base`、死链、`lang`、无语言嗅探、parity）+ `--profile landing`（缺类名只报 `info`），**只依赖 node 内置模块**（供 `emit-check` 内联）
+- [x] 写 `scripts/lib/scaffold.mjs`：`--dry-run` 文件清单 + `--apply` 落盘（`astro.config.mjs`、`site/package.json`、内容骨架、组件、预设、workflow、`site/.gitignore`）
+- [x] 写 `scripts/lib/audit.mjs`：框架识别 + 复用 `check` + 非 Starlight 只报告（不写文件）
+- [x] 写 `scripts/lib/emit-check.mjs`：把 `check.mjs` 渲染成值内联的自包含脚本（不复制判断逻辑）
+- [x] 写 `scripts/lib/report.mjs`：`schemaVersion: 1` 的 JSON / Markdown 输出 + `next` 映射 + `--fail-on` 退出码
+- [x] 写 `scripts/site.mjs`：参数解析、action 分发（detect / scaffold / check / audit / emit-check）、`unknown_action` 报错
+- [x] 写 `assets/custom.css`：裁剪版 `sd-*` 预设（≤200 行，含 §10 的修法）
+- [x] 写 `assets/menu.css`：ThemeSelect/LanguageSelect 的控件样式（不覆盖 Starlight 配色）
+- [x] 写 `assets/components/ThemeSelect.astro`（总是生成）与 `LanguageSelect.astro`（仅多语言）
+- [x] 写 `assets/pages.yml`：`npm ci --prefix site` + build + `upload-pages-artifact`（`site/dist`）
+- [x] 写 `SKILL.md`（≤150 行）：触发、决策树、唯一入口、`next` 处理、硬边界
+- [x] 写 `references/{new-site,audit,i18n,pitfalls}.md`
+- [x] `skill_validate` + `skill_parse` 通过
+- [x] 临时仓库 smoke：`scaffold --apply` → `npm install` → `check` core 全绿（Node 22.12+）
+- [x] `emit-check` 产物在**没有 skill** 的临时仓库跑通，结论与 skill 内 `check` 一致
+- [x] `--profile landing` 在缺 `.sd-*` 类时只报 `info`，不报 `error`
+- [x] 删临时仓库；`node tools/verify.mjs` 仍全绿（本仓库无回归）
+- [x] 小步提交，合并 `main`，push
+
+## 实施记录（2026-11-03）
+
+计划没写死的点，执行时的判断：
+
+- `emit-check` 是唯一**默认写盘**的动作（`--dry-run` 才预览）：`--out` 已给出唯一路径，再要求 `--apply` 没有信息增益。
+- scaffold 默认 `--search none`：Pagefind 在 Windows 可能缺二进制；要全文搜索显式传 `pagefind`。
+- Pages workflow 生成在**仓库根** `.github/workflows/pages.yml`——GitHub 不读 `site/.github/`。
+- 额外生成 `public/favicon.svg`：Starlight 总会链接 `/favicon.svg`，缺了就是全线死链（smoke 实跑发现）。
+- 本地安装/构建以站点目录为 cwd；`npm install --prefix site` 实测不装（ENOENT），而 `npm ci --prefix site` / `npm run build --prefix site` 可用，所以 CI 模板仍按计划用 `--prefix`。
+- 构建/安装辅助函数放在 `scaffold.mjs`（`ensureDeps` / `buildSite` / `runStep`），不新增第 7 个 lib 文件，保持 §4 的结构。
+- root 模式下已有 `.gitignore` 不改写，只报 `GITIGNORE_MANUAL`；已有根 `package.json` 不改依赖，报 `ROOT_PACKAGE_JSON_CONFLICT`。
+- `--default-locale` 在 v1 只支持 `root`，其它值报 `DEFAULT_LOCALE_IGNORED`（warn）。
+- `--site-url` 被接受但 v1 未参与断言（canonical 只查是否存在，不比对域名）。
+- `--baseline` / `--browser-report` 只在 `audit` 生效（计划把它们归在 audit/check 一组）。
+
+验证记录：
+
+- `skill_validate` valid；`skill_parse` 的 name/description 正常；`SKILL.md` 125 行。
+- 主仓库：`check` 24 路由（12 + 12 镜像）、652 链接、0 findings，与 `site/scripts/check-dist.mjs` 结论一致。
+- 临时仓库 smoke（site 模式 + root 模式、`root,zh-cn`、`developer-dark`）：`scaffold --apply` → install → build → `check --profile landing`，0 findings。
+- `emit-check` 产物在**没有 skill 的**临时仓库可用：正常 dist 输出 ok；删页后报 `ROUTE_MIRROR_MISMATCH` / `DEAD_LINK` / `SWITCHER_MISSING`，退出码 1。
+- `--node 20`：`detect` 报 `NODE_UNSUPPORTED`、`check` 报 `node_unsupported`，都退出 1。
+- `node tools/verify.mjs` 333 项全绿；`npm run docs:build` 24 页；`npm run docs:check` 5 项全绿。
+
+未验证：
+
+- `--check-links all` 的外部 HEAD 检查（本次未联网实测）。
+- Linux CI 上的导出物行为（纯 Node，风险低，未实测）。
+- 浏览器视觉验收（本机无浏览器工具，未验证）。
 
 ## 0. 术语
 
