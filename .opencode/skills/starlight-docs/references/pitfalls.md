@@ -47,6 +47,8 @@
 - 原生 `<select>` 的弹层与 hover 行由系统/浏览器绘制，CSS 控不了；所以主题/语言菜单是自定义列表（`ThemeSelect` / `LanguageSelect`）。
 - 列表的「当前值」和「hover」要分开：当前值由触发器文字表达；列表静止态同色，只有 hover 变强调色。
 - 移动端把菜单收进 header 的图标 + caret，别让长语言名撑爆导航。
+- **splash 页面没有移动菜单**：Starlight 的 header 右组是 `sl-hidden md:sl-flex`，手机上默认整组消失；docs 页有汉堡菜单（菜单里包含主题/语言），splash 页没有，于是主题/语言在手机上不可达。修法（`menu.css` 已带）：仅在**没有** `starlight-menu-button` 的页面把右组放回来，并用 icon-only 触发器。注意菜单按钮在 `nav.sidebar` 里、**不在 header 内**，所以判据挂在 `body` 上：
+  `body:not(:has(starlight-menu-button)) header.header .right-group { display: flex; }`
 - 组件依赖 `menu.css`；只拷 `.astro` 不拷 CSS，菜单就是裸列表。
 
 ## 构建与搜索
