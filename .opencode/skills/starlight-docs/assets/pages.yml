@@ -1,0 +1,41 @@
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+@@SETUP@@
+      - run: @@INSTALL@@
+      - name: Build the documentation site
+        run: @@BUILD@@
+      # Optional: export the checker first with
+      #   node <skill>/scripts/site.mjs --action emit-check --repo . --out <path>
+      # then uncomment the next line to gate the build on it.
+      # - run: node @@CHECK_PATH@@
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: @@DIST@@
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
