@@ -1,0 +1,107 @@
+/*
+ * starlight-docs — header menu styles for ThemeSelect / LanguageSelect.
+ * Generated whenever those components are; without it the popups are bare
+ * lists. Colours come from Starlight tokens so the preset is optional.
+ */
+
+.sd-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.sd-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 2.75rem;
+  padding: 0 0.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--sl-color-gray-2);
+  font-family: var(--sl-font);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.sd-menu-trigger:hover,
+.sd-menu[data-open] .sd-menu-trigger {
+  color: var(--sl-color-white);
+}
+
+.sd-menu-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.sd-menu-caret {
+  width: 0.85rem;
+  height: 0.85rem;
+  opacity: 0.7;
+}
+
+/* The popup must be our own element: a native <select> paints its hover row
+   with the OS/browser palette and no CSS can reach it. */
+.sd-menu-list {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  inset-inline-end: 0;
+  z-index: 100;
+  display: none;
+  min-width: 9rem;
+  margin: 0;
+  padding: 0.3rem;
+  list-style: none;
+  background: var(--sl-color-bg);
+  border: 1px solid var(--sl-color-hairline-light);
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.28);
+}
+
+.sd-menu[data-open] .sd-menu-list {
+  display: block;
+}
+
+.sd-menu-list button,
+.sd-menu-list a {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 0;
+  border-radius: 4px;
+  outline: none;
+  appearance: none;
+  background: transparent;
+  color: var(--sl-color-text);
+  font-family: var(--sl-font);
+  font-size: 0.82rem;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* Resting rows share one colour; only the hovered row turns accent. The
+   trigger already names the current theme/language, so "current" is not a
+   second background in the list. */
+.sd-menu-list button:hover,
+.sd-menu-list a:hover {
+  background: var(--sl-color-accent);
+  color: var(--sl-color-text-invert);
+}
+
+.sd-menu-list button:focus-visible,
+.sd-menu-list a:focus-visible {
+  outline: 1px solid var(--sl-color-accent);
+  outline-offset: -1px;
+}
+
+@media (max-width: 50rem) {
+  /* Keep the header from overflowing: icon + caret, no text label. */
+  header.header .sd-menu-trigger span {
+    display: none;
+  }
+  header.header .sd-menu-trigger {
+    gap: 0.2rem;
+    padding-inline: 0.3rem;
+  }
+}
