@@ -77,15 +77,33 @@ JSON by default (`--md` for Markdown). Stable top-level shape:
 ## Layout
 
 ```text
-scripts/site.mjs        # the only entry point
-scripts/lib/detect.mjs  # repo / Node / Astro / Pages detection
-scripts/lib/scaffold.mjs# layout, file planning, install, build
-scripts/lib/check.mjs   # assertions (single implementation, builtins only)
-scripts/lib/audit.mjs   # framework detection + check + audit-only findings
-scripts/lib/emit-check.mjs # renders check.mjs into a standalone script
-scripts/lib/report.mjs  # JSON/Markdown, `next` map, exit codes
-assets/                 # Pages workflow, CSS preset, menu components, favicon
-references/             # new-site, audit, i18n, pitfalls — loaded on demand
+starlight-docs/
+├── SKILL.md                     # model entry: triggers, routing, sole entry, next, hard limits
+├── README.md                    # English guide (for humans)
+├── README-ZH.md                 # Chinese guide (for humans)
+├── LICENSE                      # MIT
+├── scripts/
+│   ├── site.mjs                 # sole entry: arg parsing, 5 actions, structured errors
+│   └── lib/
+│       ├── detect.mjs           # repo/layout/Node/package manager/Astro/Starlight/Pages
+│       ├── scaffold.mjs         # layout, file plan, dry-run/apply, install + build helpers
+│       ├── check.mjs            # single assertion implementation (core + landing), builtins only
+│       ├── audit.mjs            # framework detection + check + 404/SEO/sidebar findings
+│       ├── emit-check.mjs       # renders check.mjs into a dependency-free script
+│       └── report.mjs           # JSON/Markdown, `next` map, --fail-on exit codes
+├── assets/
+│   ├── pages.yml                # GitHub Pages workflow template (placeholders)
+│   ├── custom.css               # optional sd-* preset (~200 lines, documented fixes)
+│   ├── menu.css                 # theme/language menu styles (incl. mobile splash fix)
+│   ├── favicon.svg              # Starlight always links /favicon.svg
+│   └── components/
+│       ├── ThemeSelect.astro    # always generated; native select popups cannot be themed
+│       └── LanguageSelect.astro  # only for multiple locales; link-based switcher
+└── references/                  # read only when `next` points here
+    ├── new-site.md              # scaffold decisions, generated files, README migration
+    ├── audit.md                 # non-deterministic audit (live, visual, a11y, migration)
+    ├── i18n.md                  # bilingual recipe, locale key vs BCP-47, parity rules
+    └── pitfalls.md              # Node/base/theme/CJK/cards/menus/CI pitfalls and fixes
 ```
 
 ## Limitations

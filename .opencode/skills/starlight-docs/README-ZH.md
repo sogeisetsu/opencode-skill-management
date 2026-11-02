@@ -77,15 +77,33 @@ node .opencode/skills/starlight-docs/scripts/site.mjs --action emit-check --repo
 ## 目录结构
 
 ```text
-scripts/site.mjs        # 唯一入口
-scripts/lib/detect.mjs  # 仓库 / Node / Astro / Pages 检测
-scripts/lib/scaffold.mjs# 布局、文件清单、安装、构建
-scripts/lib/check.mjs   # 断言（唯一实现，只用内置模块）
-scripts/lib/audit.mjs   # 框架识别 + check + audit 专属检查
-scripts/lib/emit-check.mjs # 把 check.mjs 渲染成自包含脚本
-scripts/lib/report.mjs  # JSON/Markdown、next 映射、退出码
-assets/                 # Pages workflow、CSS 预设、菜单组件、favicon
-references/             # new-site / audit / i18n / pitfalls，按需加载
+starlight-docs/
+├── SKILL.md                     # 模型入口：触发、决策树、唯一入口、next、硬边界
+├── README.md                    # 英文说明（给人看）
+├── README-ZH.md                 # 中文说明（给人看）
+├── LICENSE                      # MIT
+├── scripts/
+│   ├── site.mjs                 # 唯一入口：参数解析、5 个 action 分发、结构化报错
+│   └── lib/
+│       ├── detect.mjs           # 仓库/布局/Node/包管理器/Astro/Starlight/Pages 检测
+│       ├── scaffold.mjs         # 布局、文件清单、dry-run/apply、安装与构建辅助
+│       ├── check.mjs            # 断言唯一实现（core + landing），只用 node 内置模块
+│       ├── audit.mjs            # 框架识别 + 复用 check + 404/SEO/sidebar 检查
+│       ├── emit-check.mjs       # 把 check.mjs 渲染成零依赖的自包含脚本
+│       └── report.mjs           # JSON/Markdown、next 映射、--fail-on 退出码
+├── assets/
+│   ├── pages.yml                # GitHub Pages workflow 模板（占位变量）
+│   ├── custom.css               # 可选 sd-* 预设（约 200 行，含 pitfalls 的修法）
+│   ├── menu.css                 # 主题/语言菜单样式（含手机端 splash 修复）
+│   ├── favicon.svg              # Starlight 总会链接 /favicon.svg，缺了就是死链
+│   └── components/
+│       ├── ThemeSelect.astro    # 总是生成；原生 select 弹层控不了
+│       └── LanguageSelect.astro  # 仅多语言时生成；链接式切换器
+└── references/                  # 只在 next 指向时读
+    ├── new-site.md              # scaffold 取舍、生成物、README 搬运、落地验收
+    ├── audit.md                 # 非确定性审计（线上/视觉/可访问性/非 Starlight 迁移）
+    ├── i18n.md                  # 双语配方、locale key 与 BCP-47、parity 规则
+    └── pitfalls.md              # 版本/Node/base/主题/CJK/卡片/菜单/CI 的坑与修法
 ```
 
 ## 已知限制
