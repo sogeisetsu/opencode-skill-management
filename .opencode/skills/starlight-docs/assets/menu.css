@@ -96,6 +96,13 @@
 }
 
 @media (max-width: 50rem) {
+  /* A splash page has no mobile menu, so Starlight's `sl-hidden` right group
+     would leave theme/language unreachable on phones. The menu button lives
+     inside `nav.sidebar`, not inside the header, so test the page body. */
+  body:not(:has(starlight-menu-button)) header.header .right-group {
+    display: flex;
+  }
+
   /* Keep the header from overflowing: icon + caret, no text label. */
   header.header .sd-menu-trigger span {
     display: none;

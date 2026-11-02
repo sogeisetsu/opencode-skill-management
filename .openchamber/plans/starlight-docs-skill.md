@@ -53,11 +53,12 @@
 - `--node 20`：`detect` 报 `NODE_UNSUPPORTED`、`check` 报 `node_unsupported`，都退出 1。
 - `node tools/verify.mjs` 333 项全绿；`npm run docs:build` 24 页；`npm run docs:check` 5 项全绿。
 - `--check-links all` 补验（2026-11-03）：主站 23 条外链，直连时 0 findings；临时 dist 实测 404 → `EXTERNAL_LINK_UNREACHABLE`（warn）、403 → `EXTERNAL_LINK_BLOCKED`（info）、`ENOTFOUND` → `EXTERNAL_LINK_UNVERIFIED`（info）、全失败 → 单条 `EXTERNAL_LINKS_UNAVAILABLE`（info）。同机网络曾一次 23/23 超时、数分钟后全部 200，结论是**不能当门禁**。
+- 浏览器视觉验收（2026-11-03，OCW 看、bsk 量）：临时站 1440×900 / 390×844，亮/暗各一次。实测 h1 行高比 1.16（含长中文标题）；暗色 `::selection` #e9e6ab/#111111、亮色 #f3efc2/#141312；无存储值时默认 dark，选 light / Auto 后翻页不回退；4 张卡片 top 相同（617）且 `margin-top: 0`；hero 单列 1080px；docs 页 `.sl-anchor-link` 为 none；hover 行 `#e9e6ab`、静止行透明且同色，当前值只在 `aria-selected`；Escape 关闭且 `aria-expanded=false`；390 宽无横向滚动、代码块 `scrollWidth === clientWidth`。`audit --browser-report` 消费结果后 0 `VISUAL_REGRESSION`。
+- 视觉验收发现并修复一个真实缺陷：**splash 页在手机上主题/语言不可达**（Starlight header 右组 `sl-hidden md:sl-flex`，而 splash 没有汉堡菜单）。`menu.css` 增加 `body:not(:has(starlight-menu-button)) header.header .right-group { display: flex; }`（菜单按钮在 `nav.sidebar` 里，不在 header 内），重建后 390 宽下三个控件可见且不溢出。
 
 未验证：
 
 - Linux CI 上的导出物行为（纯 Node，风险低，未实测）。
-- 浏览器视觉验收（本机无浏览器工具，未验证）。
 
 ## 0. 术语
 

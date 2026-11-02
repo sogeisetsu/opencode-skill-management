@@ -61,7 +61,7 @@ node <skill>/scripts/site.mjs --action audit --repo <repo> \
 - **卡片对齐**：网格里第 2 张及之后的卡片是否被 prose 的 `* + *` 上边距顶下去。
 - **CJK 行距**：两行大标题是否贴住（`line-height` < 1.15 会贴）。
 - **菜单**：hover 行是否只有一行高亮；当前值是否由触发器文字表达，而不是列表里多一种底色。
-- **移动端**：长命令是否换行/可横向滚动；菜单是否把 header 撑爆。
+- **移动端**：长命令是否换行/可横向滚动；`scrollWidth === clientWidth`（无横向滚动）；菜单是否把 header 撑爆；**splash 页在手机上是否仍能切主题/语言**（docs 页在汉堡菜单里，splash 页没有菜单，需要把右组放回 header）。
 - **可访问性**：菜单能否用键盘打开/关闭，`aria-expanded` 是否跟随，Escape 是否关闭。
 - **首屏**：无图 hero 是否仍留出 `7fr 4fr` 的图片列（右侧空白）。
 
