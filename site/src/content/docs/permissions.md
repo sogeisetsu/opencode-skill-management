@@ -126,8 +126,9 @@ Rules set in `agents.<id>.permissions` are not edited by this tool. They are onl
 
 The plugin resolves the global config in this order:
 
-1. `<config>` is `$XDG_CONFIG_HOME/opencode` if `XDG_CONFIG_HOME` is set, else
-   `~/.config/opencode` (`C:\Users\<you>\.config\opencode` on Windows).
+1. `<config>` is `$OPENCODE_CONFIG_DIR` if that is set, else `$XDG_CONFIG_HOME/opencode` if
+   `XDG_CONFIG_HOME` is set, else `~/.config/opencode`
+   (`C:\Users\<you>\.config\opencode` on Windows).
 2. Candidates are `opencode.json` and `opencode.jsonc` in `<config>`, plus the same names in
    `~/.config/opencode` when that is a different directory. `opencode.jsonc` is preferred over
    `opencode.json`.

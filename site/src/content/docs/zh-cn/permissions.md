@@ -118,8 +118,9 @@ rules[1] { action: "skill", resource: "windows-shell", effect: "deny"  }
 
 全局配置按以下顺序解析：
 
-1. `<config>`：设置了 `$XDG_CONFIG_HOME` 时是 `$XDG_CONFIG_HOME/opencode`，否则是
-   `~/.config/opencode`（Windows 上 `C:\Users\<你>\.config\opencode`）。
+1. `<config>`：设置了 `$OPENCODE_CONFIG_DIR` 时就是它；否则设置了 `$XDG_CONFIG_HOME` 时是
+   `$XDG_CONFIG_HOME/opencode`，再否则是 `~/.config/opencode`
+   （Windows 上 `C:\Users\<你>\.config\opencode`）。
 2. 候选是 `<config>` 下的 `opencode.json`、`opencode.jsonc`；当 `~/.config/opencode`
    是另一个目录时，再加上那里的同名文件。`opencode.jsonc` 优先于 `opencode.json`。
 3. 两个位置都含 `permissions` 数组时，选 `~/.config/opencode` 下的文件，并在输出里加警告。

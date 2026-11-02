@@ -62,6 +62,9 @@ with code `2`, leaving every file untouched.
 | `--npm` | Assert the npm channel is installed; never write; exits `1` when it is missing |
 | `--force` | Write anyway (creates two copies; the host reports `Duplicate plugin ID` for one of them) |
 | `--json` | Machine-readable output |
+| `--help` / `-h` | Print usage and exit `0`; writes nothing |
+
+Unknown flags exit with code `3`; nothing is written.
 
 OpenCode loads every `.js` and `.ts` file in `<config>/plugins/`, plus subdirectories. You do
 not register the file in `opencode.jsonc`.

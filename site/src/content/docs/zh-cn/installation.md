@@ -55,6 +55,9 @@ node tools/install.mjs --check  # 只报告：落点、版本、有没有冲突
 | `--npm` | 断言走 npm 渠道，永不写文件；没找到渠道退出 `1` |
 | `--force` | 无视冲突照写（会制造两份，宿主会给其中一份报 `Duplicate plugin ID`） |
 | `--json` | 机器可读输出 |
+| `--help` / `-h` | 打印用法并退出 `0`；不写任何文件 |
+
+未知参数退出 `3`，不写任何文件。
 
 OpenCode 会加载 `<config>/plugins/` 下的每个 `.js`、`.ts` 文件以及子目录。不需要在
 `opencode.jsonc` 里登记。

@@ -14,7 +14,8 @@ description: 诊断插件不出现、意外的 ask 状态、被覆盖的规则�
 **刚装上但没生效。** 插件在进程启动时加载。重启 OpenCode（或开新进程）再查。
 
 **用的是通道三。** 确认目标存在：`<config>/plugins/skill_management.js`。`<config>` 在设置了
-`$XDG_CONFIG_HOME` 时是它下面的 `opencode`，否则是 `~/.config/opencode`。
+`$OPENCODE_CONFIG_DIR` 时是它，否则在设置了 `$XDG_CONFIG_HOME` 时是它下面的 `opencode`，
+再否则是 `~/.config/opencode`。
 `node tools/install.mjs --dry-run` 会打印确切路径。
 
 **`plugins/` 里多了第二个文件。** 该目录下每个 `.js`/`.ts` 都会被当成插件加载。辅助模块或

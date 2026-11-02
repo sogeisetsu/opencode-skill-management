@@ -16,8 +16,9 @@ can also be empty — run it again.
 OpenCode (or start a new process) and check again.
 
 **Channel 3 was used.** Confirm the destination exists:
-`<config>/plugins/skill_management.js`. `<config>` is `$XDG_CONFIG_HOME/opencode` when set,
-otherwise `~/.config/opencode`. `node tools/install.mjs --dry-run` prints the exact path.
+`<config>/plugins/skill_management.js`. `<config>` is `$OPENCODE_CONFIG_DIR` when set, else
+`$XDG_CONFIG_HOME/opencode` when set, otherwise `~/.config/opencode`.
+`node tools/install.mjs --dry-run` prints the exact path.
 
 **A second file was added to `plugins/`.** Every `.js`/`.ts` file in that directory is loaded as
 a plugin. A helper module or a second copy will be loaded too and can fail validation. Keep

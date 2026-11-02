@@ -6,7 +6,7 @@
 ## 命令
 
 ```pwsh
-node tools/verify.mjs                # 279 项断言（A–J）；跑在临时 <config> 下，不碰真实配置
+node tools/verify.mjs                # 333 项断言（A–J）；跑在临时 <config> 下，不碰真实配置
 node tools/verify.mjs --section G    # 只跑一段（A–J，按标题前缀匹配，大小写不敏感）
 node tools/install.mjs               # 装/升级单文件副本；有 npm 条目或第二份副本时拒绝写（退出 2）
 node tools/install.mjs --check       # 只报告：落点、版本、两处来源（不写文件）
