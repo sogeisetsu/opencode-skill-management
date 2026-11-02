@@ -426,13 +426,14 @@ export function main(argv = process.argv.slice(2), ctx = {}) {
   state.json = flags.json
   state.dryRun = flags.dryRun
   if (flags.help) {
-    out("用法：node tools/install.mjs [--check|--dry-run] [--uninstall] [--npm] [--force] [--json]")
+    out("用法：node tools/install.mjs [--check|--dry-run] [--uninstall] [--npm] [--force] [--json] [--help]")
     out("")
     out("  --check / --dry-run  只报告现状与冲突，不写任何文件")
     out("  --uninstall          删除 <config>/plugins/skill_management.js（仅此一个文件）")
     out("  --npm                断言 npm 渠道已装，永不写文件")
     out("  --force              无视冲突照写（会制造两份，宿主会给其中一份报 Duplicate plugin ID）")
     out("  --json               机器可读输出")
+    out("  --help / -h          打印本用法并退出 0")
     return EXIT_OK
   }
 
